@@ -10,7 +10,8 @@ const git = (cwd, ...args) =>
 
 /** Creates a temporary Git repository. Paths are resolved, so macOS /var symlinks do not break comparisons. */
 function makeRepo({ commit = true, dirName = 'repo' } = {}) {
-  const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pd-test-')));
+  // The native form also expands Windows short names such as RUNNER~1.
+  const base = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'pd-test-')));
   const root = path.join(base, dirName);
   fs.mkdirSync(root, { recursive: true });
   git(root, 'init', '-q', '-b', 'main');
@@ -29,7 +30,7 @@ function makeRepo({ commit = true, dirName = 'repo' } = {}) {
 function addWorktree(root, name) {
   const target = path.join(path.dirname(root), name);
   git(root, 'worktree', 'add', '-q', '-b', `wt-${name}`, target);
-  return fs.realpathSync(target);
+  return fs.realpathSync.native(target);
 }
 
 /** Activates capture directly, without going through the CLI. */
