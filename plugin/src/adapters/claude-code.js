@@ -91,4 +91,14 @@ function normalize(payload) {
   return normalized;
 }
 
-module.exports = { normalize };
+/**
+ * The folder the session was opened in. Unlike the payload's cwd, it stays put when
+ * the session changes directory.
+ *
+ * @returns {string | null}
+ */
+function projectDir(env) {
+  return env.CLAUDE_PROJECT_DIR || null;
+}
+
+module.exports = { normalize, projectDir };

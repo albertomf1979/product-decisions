@@ -12,7 +12,10 @@ const factor = Number(process.env.PD_LATENCY_FACTOR || 1);
 
 const cleanEnv = (env) => {
   const merged = { ...process.env, ...env };
-  if (!env || !('PRODUCT_DECISIONS_SYNTH' in env)) delete merged.PRODUCT_DECISIONS_SYNTH;
+  // The tests may themselves run inside an agent session, so its values must not leak in.
+  for (const name of ['PRODUCT_DECISIONS_SYNTH', 'CLAUDE_PROJECT_DIR']) {
+    if (!env || !(name in env)) delete merged[name];
+  }
   return merged;
 };
 

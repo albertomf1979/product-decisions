@@ -10,8 +10,8 @@ const CONSENT = `product-decisions records your agent sessions in this repositor
 
 What is recorded: your prompts, agent responses, and tool inputs and results in
 full, including files the agent reads, plus your Git user name. Secrets are
-redacted by pattern, which is not perfect. Contents of files such as .env are
-never stored.
+redacted by pattern, which is not perfect. When a tool names a file such as
+.env, its content is not stored, but content printed indirectly can be.
 
 Where it goes: only .git/product-decisions on this machine. Nothing is shared.
 
@@ -68,7 +68,7 @@ async function init({ cwd, flags }) {
     summary: `Capture activated by ${state.actor_name}`,
     payload: { statement: CONSENT },
   });
-  console.log('Activated. New sessions in this repository will be captured.');
+  console.log('Activated. Sessions here are captured from now on, including any already open.');
   return 0;
 }
 

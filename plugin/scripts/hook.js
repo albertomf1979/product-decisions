@@ -15,7 +15,8 @@ try {
 
   const [tool, hookEvent] = process.argv.slice(2);
 
-  // Open stdin keeps the process alive, so this fires if the payload never ends.
+  // Open stdin keeps the process alive, so this fires if the payload never ends. It cannot
+  // interrupt the synchronous capture that follows, which relies on bounded redaction.
   setTimeout(done, hookEvent === 'SessionEnd' ? 1000 : 2000).unref();
 
   // A stream, not fs.readFileSync(0), which fails on some Windows and non-blocking pipes.
@@ -27,6 +28,7 @@ try {
       require('../src/hook/run.js').handlePayload({
         raw: Buffer.concat(chunks),
         tool,
+        hookEvent,
         cwd: process.cwd(),
       });
     } finally {

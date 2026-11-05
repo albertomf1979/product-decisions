@@ -2,16 +2,22 @@
 
 const crypto = require('node:crypto');
 
+const { MAX_PAYLOAD_BYTES } = require('./limits.js');
+
 const BASE64_MIN_RUN = 4096;
-const MAX_PAYLOAD_BYTES = 4 * 1024 * 1024;
 
 const sha256 = (data) => crypto.createHash('sha256').update(data).digest('hex');
 const mark = (type) => `[REDACTED:${type}]`;
 
+const URL_SCHEME = '[a-z][a-z0-9+.-]{0,31}:\\/\\/';
+
 // Order matters: specific token shapes first, then the broader assignment rules.
-// Every pattern must stay linear on large input, because this runs inside a hook.
+// This runs synchronously in a hook, where no watchdog can interrupt it, so every
+// repeated part that can fail after a long scan has an upper bound. Tests in
+// redact.test.js hold each rule to its budget on the input that used to break it.
 const RULES = [
-  [/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, mark('private_key')],
+  // An unterminated key runs to the end of the text: "head -5 key.pem" still counts.
+  [/-----BEGIN [A-Z ]{0,32}PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]{0,32}PRIVATE KEY-----|$)/g, mark('private_key')],
   [/\bsk-ant-[A-Za-z0-9_-]{10,}/g, mark('anthropic_key')],
   [/\bsk-(?:proj-|svcacct-|admin-)?[A-Za-z0-9_-]{20,}/g, mark('openai_key')],
   [/\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}\b/g, mark('github_token')],
@@ -21,29 +27,41 @@ const RULES = [
   [/\bxox[abprs]-[A-Za-z0-9-]{10,}\b/g, mark('slack_token')],
   [/\b[rs]k_live_[A-Za-z0-9]{16,}\b/g, mark('stripe_key')],
   [/\bnpm_[A-Za-z0-9]{30,}\b/g, mark('npm_token')],
-  [/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g, mark('jwt')],
-  [/\b(authorization\s*[:=]\s*)(?:(?:bearer|basic|token)\s+)?[^\s"',;]+/gi, `$1${mark('auth_header')}`],
-  [/\bbearer\s+[A-Za-z0-9._~+/-]{16,}=*/gi, mark('bearer')],
-  // The scheme length is bounded: unbounded, 'a.a.a.a…' text goes quadratic.
-  [/\b([a-z][a-z0-9+.-]{0,31}:\/\/)[^\s:@/]+:[^\s@/]+@/gi, `$1${mark('url_credentials')}@`],
+  // Only the header is bounded: it is short in real tokens, and each start must pass it.
+  [/\beyJ[A-Za-z0-9_-]{8,256}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g, mark('jwt')],
+  [/\b(authorization\s{0,8}[:=]\s{0,8})(?:(?:bearer|basic|token)\s{1,8})?[^\s"',;]+/gi, `$1${mark('auth_header')}`],
+  [/\bbearer\s{1,8}[A-Za-z0-9._~+/-]{16,}=*/gi, mark('bearer')],
+  [/(?<![\w-])((?:x-[a-z0-9-]{0,32}(?:key|token|secret|auth)[a-z0-9-]{0,16}|set-cookie|cookie|proxy-authorization)\s{0,8}:\s{0,8})[^\n"']+/gi, `$1${mark('auth_header')}`],
+  [new RegExp(`\\b(${URL_SCHEME})[^\\s/?#]{1,512}@`, 'gi'), `$1${mark('url_credentials')}@`],
+  [new RegExp(`\\b(${URL_SCHEME})[^\\s:@/]{1,256}:[^\\s@]{1,256}@`, 'gi'), `$1${mark('url_credentials')}@`],
+  [/([?&][a-z0-9_-]{0,32}(?:key|token|secret|password|passwd|signature)[a-z0-9_-]{0,16}=)[^&\s"'#]+/gi, `$1${mark('url_param')}`],
+  [/(?<![\w-])((?:-u|--user)[\s=]{1,8})[^\s:]{1,256}:\S+/g, `$1${mark('basic_auth')}`],
+  [/(?<![\w-])(--?[a-z0-9-]{0,32}(?:password|passwd|token|secret|api-?key)\s{1,8})(?!-)\S+/gi, `$1${mark('cli_flag')}`],
+  // Environment style: the value runs to the end of the line, because it may be unquoted.
   [
-    /\b([A-Z0-9_]*(?:SECRET|TOKEN|PASSWORD|PASSWD|API_?KEY|PRIVATE_?KEY|CREDENTIAL|ACCESS_?KEY)[A-Z0-9_]*\s*[=:]\s*)("[^"\n]*"|'[^'\n]*'|[^\s"',;]+)/g,
+    /(?<![A-Z0-9_])([A-Z0-9_]{0,64}(?:SECRET|TOKEN(?!S\b)|PASSWORD|PASSWD|_PASS(?![A-Z])|API_?KEY|_KEY|CREDENTIALS?|WEBHOOK)[A-Z0-9_]{0,64}\s{0,8}[=:]\s{0,8})("[^"\n]*"|'[^'\n]*'|[^\n]*)/g,
     `$1${mark('env_assignment')}`,
   ],
-  [/((?:password|passwd|secret|token|api[_-]?key)["']?\s*[:=]\s*)(["'])[^"'\n]{8,}\2/gi, `$1${mark('quoted_secret')}`],
+  // Code and configuration style. A call such as getToken() is not a value worth hiding.
+  [
+    /(?<![a-z0-9_.-])((?:--?)?[a-z0-9_.-]{0,48}(?:pass(?:word|wd)|secret|token|api[_-]?key|credential|webhook|(?:secret|private|access|signing|encryption|client)[_-]?key)\\?["']?\s{0,8}[:=]\s{0,8})(?!\[REDACTED)(\\"[^"\n]{0,4096}?\\"|"[^"\n]*"|'[^'\n]*'|(?![\w.$]{0,256}\()[^\s"',;)}]+)/gi,
+    `$1${mark('assignment')}`,
+  ],
 ];
 
-const SECRET_KEY = /^(password|passwd|secret|token|api[_-]?key|authorization|private[_-]?key|access[_-]?key)$/i;
+const SECRET_KEY = /(?:pass(?:word|wd)?|secret|token|api[_-]?key|authorization|credentials?|cookie|(?:private|access|secret|signing|encryption|client)[_-]?key)$/i;
 
+// The PRD's globs (.env*, *.pem, *.key, id_rsa*, credentials*) and their relatives.
 const SECRET_BASENAMES = [
-  /^\.env(\..*)?$/,
-  /\.(pem|key|p12|pfx)$/,
-  /^id_(rsa|dsa|ecdsa|ed25519)$/,
-  /^credentials(\..*)?$/,
+  /^\.env/i,
+  /\.(pem|key|p12|pfx)$/i,
+  /^id_(rsa|dsa|ecdsa|ed25519)/i,
+  /^credentials/i,
+  /^\.(netrc|npmrc|pgpass|pypirc|git-credentials)$/i,
 ];
 
-// Tool input fields that carry a file's content.
-const CONTENT_FIELDS = ['content', 'old_string', 'new_string', 'new_source', 'edits'];
+// Input fields that name a file. Everything else in the input may carry its content.
+const PATH_FIELD = /(?:path|paths|file|files|filename|filenames|glob)$/i;
 
 const isBase64Code = (c) =>
   (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c === 43 || c === 47;
@@ -89,15 +107,16 @@ function redactString(text, extra = []) {
   return out;
 }
 
-/** Deep copy with every string redacted. The input is not mutated. */
+/** Deep copy with every string redacted, keys included. The input is not mutated. */
 function redactValue(value, extra = []) {
   if (typeof value === 'string') return redactString(value, extra);
   if (Array.isArray(value)) return value.map((item) => redactValue(item, extra));
   if (value === null || typeof value !== 'object') return value;
   // Object.fromEntries defines own properties, so a "__proto__" key stays inert.
   return Object.fromEntries(Object.entries(value).map(([key, item]) => {
-    if (SECRET_KEY.test(key) && typeof item === 'string' && item !== '') return [key, mark('key')];
-    return [key, redactValue(item, extra)];
+    const safeKey = redactString(key, extra);
+    if (SECRET_KEY.test(key) && item !== null && item !== '' && typeof item !== 'boolean') return [safeKey, mark('key')];
+    return [safeKey, redactValue(item, extra)];
   }));
 }
 
@@ -109,7 +128,7 @@ function isSecretPath(target) {
 
 /** @returns {boolean} Whether a shell command mentions a secret file. */
 function commandTouchesSecretFile(command) {
-  return String(command).split(/[\s"'`;|&<>()=]+/).filter(Boolean).some(isSecretPath);
+  return String(command).split(/[\s"'`;|&<>(){},=]+/).filter(Boolean).some(isSecretPath);
 }
 
 const hashedContent = (value) => ({
@@ -117,27 +136,36 @@ const hashedContent = (value) => ({
   sha256: sha256(typeof value === 'string' ? value : JSON.stringify(value)),
 });
 
-/**
- * Keeps only a hash of any content that belongs to a secret file. Pattern redaction
- * alone would miss values that look like nothing in particular.
- *
- * @returns {{ toolInput: any, toolResponse: any }}
- */
-function protectSecretFiles(_toolName, toolInput, toolResponse) {
-  const input = toolInput && typeof toolInput === 'object' ? toolInput : {};
-  const paths = [input.file_path, input.path, input.notebook_path].filter((p) => typeof p === 'string');
-  const touched = paths.some(isSecretPath)
-    || (typeof input.command === 'string' && commandTouchesSecretFile(input.command));
-  if (!touched) return { toolInput, toolResponse };
+function namesSecretFile(input) {
+  return Object.entries(input).some(([key, value]) => {
+    if (key === 'command' || key === 'cmd') return typeof value === 'string' && commandTouchesSecretFile(value);
+    if (!PATH_FIELD.test(key)) return false;
+    return (Array.isArray(value) ? value : [value]).some((item) => typeof item === 'string' && isSecretPath(item));
+  });
+}
 
-  const safeInput = { ...input };
-  for (const field of CONTENT_FIELDS) {
-    if (safeInput[field] !== undefined) safeInput[field] = hashedContent(safeInput[field]);
+/**
+ * When a tool names a secret file, keeps only where it pointed. Everything else that
+ * could carry the content is hashed, deny by default: pattern redaction alone would
+ * miss values that look like nothing in particular. A command that prints a secret
+ * without naming the file cannot be caught here.
+ *
+ * @param {object} payload The payload of a tool event.
+ * @returns {object} A copy when a secret file is involved, or the same payload.
+ */
+function protectSecretFiles(payload) {
+  const input = payload.tool_input;
+  if (!input || typeof input !== 'object' || !namesSecretFile(input)) return payload;
+
+  const isCarrier = (value) => typeof value === 'string' || (value !== null && typeof value === 'object');
+  const safeInput = Object.fromEntries(Object.entries(input).map(([key, value]) => (
+    [key, PATH_FIELD.test(key) || !isCarrier(value) ? value : hashedContent(value)]
+  )));
+  const safe = { ...payload, tool_input: safeInput };
+  for (const field of ['tool_response', 'error']) {
+    if (safe[field] !== undefined) safe[field] = hashedContent(safe[field]);
   }
-  return {
-    toolInput: safeInput,
-    toolResponse: toolResponse === undefined ? undefined : hashedContent(toolResponse),
-  };
+  return safe;
 }
 
 /** Compiles user patterns, silently dropping any that are not valid. */

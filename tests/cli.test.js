@@ -53,6 +53,18 @@ test('init shows what is recorded and where it goes', (t) => {
   assert.match(stdout, /product-decisions pause/);
 });
 
+test('init says that sessions already open are captured too', (t) => {
+  const { root } = repo(t);
+  assert.match(init(root).stdout, /including any already open/);
+});
+
+test('init does not promise more than the plugin enforces about secret files', (t) => {
+  const { root } = repo(t);
+  const { stdout } = init(root);
+  assert(!/never stored/.test(stdout));
+  assert.match(stdout, /printed indirectly/);
+});
+
 test('init writes a consent event that records the statement', (t) => {
   const { root } = repo(t);
   init(root);

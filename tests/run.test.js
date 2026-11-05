@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { contentHash } = require('../plugin/src/core/event.js');
 const { makeRepo, addWorktree, activate, git } = require('./helpers/repo.js');
-const { runHook, assertSilent, fixture, fixtureNames, storeOf, capturedEvents, storeText, copyPlugin, walk } = require('./helpers/hook-runner.js');
+const { factor, runHook, assertSilent, fixture, fixtureNames, storeOf, capturedEvents, storeText, copyPlugin, walk } = require('./helpers/hook-runner.js');
 const { corpus } = require('./helpers/secrets.js');
 
 function activeRepo(t, options, state) {
@@ -230,6 +230,130 @@ test('invalid JSON is logged without quoting the input', (t) => {
   const log = fs.readFileSync(path.join(storeOf(root), 'logs', 'diagnostics.log'), 'utf8');
   assert(log.includes('SyntaxError'));
   assert(!log.includes('MARKER'));
+});
+
+test('a failed command that read a secret file leaves no value anywhere', (t) => {
+  const { root } = activeRepo(t);
+  send(root, 'PostToolUseFailure-Bash.json', {
+    tool_input: { command: 'cat .env && npm test' },
+    error: 'Exit code 1\nDB_PASS=SENTINELvalue42',
+  });
+  assert(!storeText(root).includes('SENTINELvalue42'));
+  assert.equal(capturedEvents(root).length, 1);
+});
+
+test('a shell write to a secret file leaves no value in the summary', (t) => {
+  const { root } = activeRepo(t);
+  send(root, 'PostToolUse-Bash.json', { tool_input: { command: 'echo DB_PASS=SENTINELvalue42 >> .env' } });
+  const [event] = capturedEvents(root);
+  assert.equal(event.summary, 'Bash');
+  assert(!storeText(root).includes('SENTINELvalue42'));
+});
+
+test('a secret in a URL query does not reach the summary or the sources', (t) => {
+  const { root } = activeRepo(t);
+  send(root, 'PostToolUse-WebFetch.json', { tool_input: { url: 'https://example.com/x?api_key=SENTINELvalue42' } });
+  const [event] = capturedEvents(root);
+  assert(!event.summary.includes('SENTINEL'));
+  assert(!JSON.stringify(event.sources).includes('SENTINEL'));
+});
+
+function runWithProject(root, project, cwd, name = 'Stop.json') {
+  const payload = fixture(name, { cwd });
+  assertSilent(runHook({
+    stdin: JSON.stringify(payload),
+    cwd: root,
+    event: payload.hook_event_name,
+    env: { CLAUDE_PROJECT_DIR: project },
+  }));
+}
+
+test('a session that changes directory out of the repository stays captured', (t) => {
+  const { root, base } = activeRepo(t);
+  const outside = path.join(base, 'elsewhere');
+  fs.mkdirSync(outside);
+  runWithProject(root, root, outside);
+  assert.equal(capturedEvents(root).length, 1);
+});
+
+test('a session that moves into a nested repository stays with its project', (t) => {
+  const { root } = activeRepo(t);
+  const nested = path.join(root, 'vendor', 'lib');
+  fs.mkdirSync(nested, { recursive: true });
+  git(nested, 'init', '-q');
+  runWithProject(root, root, nested);
+  assert.equal(capturedEvents(root).length, 1);
+  assert.equal(fs.existsSync(path.join(nested, '.git', 'product-decisions')), false);
+});
+
+test('the project repository governs: its pause holds when the session moves to another active repository', (t) => {
+  const first = activeRepo(t, undefined, { paused: true, paused_at: 'x' });
+  const second = activeRepo(t);
+  runWithProject(first.root, first.root, second.root);
+  assert.equal(capturedEvents(first.root).length, 0);
+  assert.equal(capturedEvents(second.root).length, 0);
+});
+
+test('a session opened above the repository is captured once it moves in', (t) => {
+  const { root, base } = activeRepo(t);
+  runWithProject(root, base, root);
+  assert.equal(capturedEvents(root).length, 1);
+});
+
+test('a project repository that is not activated does not swallow an activated one', (t) => {
+  const { root: inactive, cleanup } = makeRepo();
+  t.after(cleanup);
+  const { root } = activeRepo(t);
+  runWithProject(root, inactive, root);
+  assert.equal(capturedEvents(root).length, 1);
+  assert.equal(fs.existsSync(storeOf(inactive)), false);
+});
+
+const SIZE = Math.floor(3.9 * 1024 * 1024);
+const fillTo = (unit) => unit.repeat(Math.ceil(SIZE / unit.length)).slice(0, SIZE);
+
+for (const [label, name, overrides] of [
+  ['JWT-like text', 'PostToolUse-Read.json', { tool_response: fillTo('eyJaaaaaaaaaa-') }],
+  ['repeated keywords', 'PostToolUse-Read.json', { tool_response: fillTo('SECRET_') }],
+  ['repeated key headers', 'PostToolUse-Read.json', { tool_response: fillTo('-----BEGIN RSA PRIVATE KEY-----\n') }],
+  ['dotted URLs in an MCP result', 'PostToolUse-mcp.json', { tool_response: Array(4).fill(`https://example.com/${'a.'.repeat(30000)}x`).join(' ') }],
+]) {
+  test(`${label} finish inside the watchdog budget`, (t) => {
+    const { root } = activeRepo(t);
+    const payload = fixture(name, { cwd: root, ...overrides });
+    const result = runHook({ stdin: JSON.stringify(payload), cwd: root, event: 'PostToolUse' });
+    assertSilent(result);
+    assert(result.ms < 2000 * factor, `took ${result.ms.toFixed(0)} ms`);
+    assert.equal(capturedEvents(root).length, 1);
+  });
+}
+
+test('a huge structured payload is not parsed, and still leaves evidence', (t) => {
+  const { root } = activeRepo(t);
+  const head = JSON.stringify(fixture('PostToolUse-Read.json', { cwd: root, session_id: 'huge', tool_response: null })).slice(0, -1);
+  const stdin = `${head},"filler":[${'{"a":1},'.repeat(8 * 1024 * 1024)}0]}`;
+  const result = runHook({ stdin, cwd: root, event: 'PostToolUse' });
+  assertSilent(result);
+  assert(result.ms < 2000 * factor, `took ${result.ms.toFixed(0)} ms`);
+  const [event] = capturedEvents(root);
+  assert.equal(event.session_id, 'huge');
+  assert.equal(event.event_type, 'tool_call');
+  assert.equal(event.payload.oversized, true);
+  assert.equal(event.summary, 'Read');
+});
+
+test('an ancestor package.json of type module does not stop capture', (t) => {
+  const { root, base } = activeRepo(t);
+  fs.mkdirSync(path.join(base, 'cache'));
+  fs.writeFileSync(path.join(base, 'cache', 'package.json'), '{"type":"module"}\n');
+  const plugin = copyPlugin(path.join(base, 'cache'), 'plugin');
+  const result = runHook({
+    stdin: JSON.stringify(fixture('Stop.json', { cwd: root })),
+    cwd: root,
+    hookPath: path.join(plugin, 'scripts', 'hook.js'),
+  });
+  assertSilent(result);
+  assert.equal(capturedEvents(root).length, 1);
 });
 
 test('capture leaves Git state alone in a repository with a dirty tree', (t) => {

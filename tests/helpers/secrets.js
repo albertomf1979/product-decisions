@@ -24,7 +24,7 @@ const corpus = [
   { type: 'url_credentials', value: j('https://', 'ana:hunter2', '@example.com/x'), secret: 'ana:hunter2' },
   { type: 'env_assignment', value: j('DB_', 'PASSWORD=', 'correcthorse'), secret: 'correcthorse' },
   { type: 'env_assignment', value: j('API_', 'KEY="', 'quotedvalue', '"'), secret: 'quotedvalue' },
-  { type: 'quoted_secret', value: j('"pass', 'word": "', 'batterystaple', '"'), secret: 'batterystaple' },
+  { type: 'assignment', value: j('"pass', 'word": "', 'batterystaple', '"'), secret: 'batterystaple' },
 ].map((entry) => ({ secret: entry.value, ...entry }));
 
 module.exports = { corpus, fill };

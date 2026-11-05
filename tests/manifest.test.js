@@ -60,6 +60,10 @@ test('the marketplace points at ./plugin', () => {
   assert.equal(marketplace.plugins[0].source, './plugin');
 });
 
+test('the plugin declares its own module type', () => {
+  assert.equal(read('plugin', 'package.json').type, 'commonjs');
+});
+
 test('every registered event has a mapping in the adapter', () => {
   const { normalize } = require('../plugin/src/adapters/claude-code.js');
   for (const event of REGISTERED) assert.notEqual(normalize({ hook_event_name: event }), null, event);

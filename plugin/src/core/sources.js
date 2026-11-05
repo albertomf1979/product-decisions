@@ -8,7 +8,10 @@ const MAX_SOURCES = 50;
 const WEB_TOOLS = new Set(['WebFetch', 'WebSearch']);
 
 function classify(rawUrl) {
-  const url = rawUrl.replace(/[.,;:!?]+$/, '');
+  // A loop, because the equivalent regex goes quadratic on URLs full of dots.
+  let end = rawUrl.length;
+  while (end > 0 && '.,;:!?'.includes(rawUrl[end - 1])) end -= 1;
+  const url = rawUrl.slice(0, end);
   if (/github\.com\/[^/]+\/[^/]+\/issues\/\d+/.test(url)) return { type: 'issue', url };
   if (/github\.com\/[^/]+\/[^/]+\/pull\/\d+/.test(url)) return { type: 'pr', url };
   return { type: 'url', url };

@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { normalize } = require('../plugin/src/adapters/claude-code.js');
+const { normalize, projectDir } = require('../plugin/src/adapters/claude-code.js');
 
 const dir = path.join(__dirname, 'fixtures', 'claude-code');
 const fixtures = fs.readdirSync(dir).filter((f) => f.endsWith('.json'));
@@ -109,6 +109,11 @@ test('model hints come only from SessionStart and PostModelSwitch', () => {
   assert.deepEqual(normalize(load('PostModelSwitch.json')).modelHint, { model: 'claude-sonnet-5-5', source: 'model_switch' });
   assert.equal(normalize(load('SessionStart-startup.json')).modelHint, undefined);
   assert.equal(normalize(load('Stop.json')).modelHint, undefined);
+});
+
+test('the project folder comes from the environment', () => {
+  assert.equal(projectDir({ CLAUDE_PROJECT_DIR: '/p' }), '/p');
+  assert.equal(projectDir({}), null);
 });
 
 test('unknown hook events and non-objects return null', () => {
