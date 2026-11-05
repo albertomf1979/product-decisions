@@ -1,0 +1,11 @@
+{
+  "session_id": "265c6b21-22c6-4dbf-8f90-dd7013658b83",
+  "transcript_path": "/home/user/.claude/projects/-home-user-Documents-product-decisions/265c6b21-22c6-4dbf-8f90-dd7013658b83.jsonl",
+  "cwd": "/home/user/Documents/product-decisions",
+  "scratchpad_dir": "/private/tmp/claude-501/-home-user-Documents-product-decisions/265c6b21-22c6-4dbf-8f90-dd7013658b83/scratchpad",
+  "prompt_id": "f1dbc0b9-58c1-4736-9d53-a8a030c8b663",
+  "agent_type": "ui-color-palette:uicper",
+  "hook_event_name": "SessionStart",
+  "source": "compact",
+  "model": "claude-haiku-5-5"
+}

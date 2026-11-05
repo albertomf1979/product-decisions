@@ -1,0 +1,42 @@
+{
+  "session_id": "15899a78-3b82-4768-a3e2-bd0ad99bf77e",
+  "transcript_path": "/home/user/.claude/projects/-home-user-Documents-product-decisions/15899a78-3b82-4768-a3e2-bd0ad99bf77e.jsonl",
+  "cwd": "/home/user/Documents/product-decisions",
+  "scratchpad_dir": "/private/tmp/claude-501/-home-user-Documents-product-decisions/15899a78-3b82-4768-a3e2-bd0ad99bf77e/scratchpad",
+  "prompt_id": "15b44060-768c-4313-a5bc-57c77a5c7740",
+  "permission_mode": "acceptEdits",
+  "agent_type": "ui-color-palette:uicper",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Edit",
+  "tool_input": {
+    "file_path": "/home/user/Documents/product-decisions/spikes/tmp/out/pd-probe.txt",
+    "old_string": "hello",
+    "new_string": "hello world",
+    "replace_all": false
+  },
+  "tool_response": {
+    "filePath": "/home/user/Documents/product-decisions/spikes/tmp/out/pd-probe.txt",
+    "oldString": "hello",
+    "newString": "hello world",
+    "originalFile": "hello\n",
+    "structuredPatch": [
+      {
+        "oldStart": 1,
+        "oldLines": 1,
+        "newStart": 1,
+        "newLines": 1,
+        "lines": [
+          "-hello",
+          "+hello world"
+        ]
+      }
+    ],
+    "userModified": false,
+    "replaceAll": false
+  },
+  "tool_use_id": "toolu_01JB7dyGVPN2RgNXkP8RnBW2",
+  "duration_ms": 9
+}

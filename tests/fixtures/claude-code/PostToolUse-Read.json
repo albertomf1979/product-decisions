@@ -1,0 +1,29 @@
+{
+  "session_id": "15899a78-3b82-4768-a3e2-bd0ad99bf77e",
+  "transcript_path": "/home/user/.claude/projects/-home-user-Documents-product-decisions/15899a78-3b82-4768-a3e2-bd0ad99bf77e.jsonl",
+  "cwd": "/home/user/Documents/product-decisions",
+  "scratchpad_dir": "/private/tmp/claude-501/-home-user-Documents-product-decisions/15899a78-3b82-4768-a3e2-bd0ad99bf77e/scratchpad",
+  "prompt_id": "15b44060-768c-4313-a5bc-57c77a5c7740",
+  "permission_mode": "acceptEdits",
+  "agent_type": "ui-color-palette:uicper",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Read",
+  "tool_input": {
+    "file_path": "/home/user/Documents/product-decisions/spikes/tmp/out/pd-probe.txt"
+  },
+  "tool_response": {
+    "type": "text",
+    "file": {
+      "filePath": "/home/user/Documents/product-decisions/spikes/tmp/out/pd-probe.txt",
+      "content": "hello world\n",
+      "numLines": 2,
+      "startLine": 1,
+      "totalLines": 2
+    }
+  },
+  "tool_use_id": "toolu_01DHuCeswt7vcufL94Ed7ZzZ",
+  "duration_ms": 5
+}

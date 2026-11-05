@@ -1,0 +1,29 @@
+{
+  "session_id": "bf2db1e0-e406-4fbd-811c-e730d294ae79",
+  "transcript_path": "/home/user/.claude/projects/-home-user-Documents-product-decisions/bf2db1e0-e406-4fbd-811c-e730d294ae79.jsonl",
+  "cwd": "/home/user/Documents/product-decisions",
+  "scratchpad_dir": "/private/tmp/claude-501/-home-user-Documents-product-decisions/bf2db1e0-e406-4fbd-811c-e730d294ae79/scratchpad",
+  "prompt_id": "27f85236-ebaa-4f63-a42d-a18d183fcfaf",
+  "permission_mode": "default",
+  "agent_type": "ui-color-palette:uicper",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "mcp__probe__echo",
+  "tool_input": {
+    "text": "ping"
+  },
+  "tool_response": [
+    {
+      "type": "text",
+      "text": "echo: ping https://example.com/from-mcp"
+    }
+  ],
+  "tool_use_id": "toolu_01MTtVXRshu1WvGVmRG78ad7",
+  "duration_ms": 9,
+  "mcp_server": {
+    "name": "probe",
+    "source": "dynamic"
+  }
+}

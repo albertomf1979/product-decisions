@@ -1,0 +1,10 @@
+{
+  "session_id": "bf2db1e0-e406-4fbd-811c-e730d294ae79",
+  "transcript_path": "/home/user/.claude/projects/-home-user-Documents-product-decisions/bf2db1e0-e406-4fbd-811c-e730d294ae79.jsonl",
+  "cwd": "/home/user/Documents/product-decisions",
+  "scratchpad_dir": "/private/tmp/claude-501/-home-user-Documents-product-decisions/bf2db1e0-e406-4fbd-811c-e730d294ae79/scratchpad",
+  "prompt_id": "27f85236-ebaa-4f63-a42d-a18d183fcfaf",
+  "agent_type": "ui-color-palette:uicper",
+  "hook_event_name": "SessionEnd",
+  "reason": "other"
+}

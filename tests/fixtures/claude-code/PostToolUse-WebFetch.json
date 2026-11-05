@@ -1,0 +1,28 @@
+{
+  "session_id": "bf2db1e0-e406-4fbd-811c-e730d294ae79",
+  "transcript_path": "/home/user/.claude/projects/-home-user-Documents-product-decisions/bf2db1e0-e406-4fbd-811c-e730d294ae79.jsonl",
+  "cwd": "/home/user/Documents/product-decisions",
+  "scratchpad_dir": "/private/tmp/claude-501/-home-user-Documents-product-decisions/bf2db1e0-e406-4fbd-811c-e730d294ae79/scratchpad",
+  "prompt_id": "27f85236-ebaa-4f63-a42d-a18d183fcfaf",
+  "permission_mode": "default",
+  "agent_type": "ui-color-palette:uicper",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "WebFetch",
+  "tool_input": {
+    "url": "https://example.com",
+    "prompt": "Return the page title and the first sentence of the body text."
+  },
+  "tool_response": {
+    "bytes": 577,
+    "code": 200,
+    "codeText": "OK",
+    "result": "**Title:** Example Domain\n\n**First sentence:** \"This domain is for use in documentation examples without needing permission.\"",
+    "durationMs": 2791,
+    "url": "https://example.com"
+  },
+  "tool_use_id": "toolu_01NUkJnqCrBpjK5nXjkE3nsf",
+  "duration_ms": 2792
+}

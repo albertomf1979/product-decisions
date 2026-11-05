@@ -1,0 +1,21 @@
+{
+  "session_id": "265c6b21-22c6-4dbf-8f90-dd7013658b83",
+  "transcript_path": "/home/user/.claude/projects/-home-user-Documents-product-decisions/265c6b21-22c6-4dbf-8f90-dd7013658b83.jsonl",
+  "cwd": "/home/user/Documents/product-decisions",
+  "scratchpad_dir": "/private/tmp/claude-501/-home-user-Documents-product-decisions/265c6b21-22c6-4dbf-8f90-dd7013658b83/scratchpad",
+  "prompt_id": "06871878-5e84-4905-8c18-9c559c620a47",
+  "permission_mode": "acceptEdits",
+  "agent_type": "ui-color-palette:uicper",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PostToolUseFailure",
+  "tool_name": "Read",
+  "tool_input": {
+    "file_path": "/home/user/Documents/product-decisions/spikes/s1-hook-probe/out/pd-probe.txt"
+  },
+  "tool_use_id": "toolu_01GXJCmt4Kv1t1ZbY9HFAinP",
+  "error": "File does not exist. Note: your current working directory is /home/user/Documents/product-decisions.",
+  "is_interrupt": false,
+  "duration_ms": 20
+}

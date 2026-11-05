@@ -1,0 +1,9 @@
+{
+  "session_id": "bf2db1e0-e406-4fbd-811c-e730d294ae79",
+  "transcript_path": "/home/user/.claude/projects/-home-user-Documents-product-decisions/bf2db1e0-e406-4fbd-811c-e730d294ae79.jsonl",
+  "cwd": "/home/user/Documents/product-decisions",
+  "scratchpad_dir": "/private/tmp/claude-501/-home-user-Documents-product-decisions/bf2db1e0-e406-4fbd-811c-e730d294ae79/scratchpad",
+  "agent_type": "ui-color-palette:uicper",
+  "hook_event_name": "SessionStart",
+  "source": "startup"
+}
