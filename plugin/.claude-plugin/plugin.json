@@ -1,0 +1,9 @@
+{
+  "name": "product-decisions",
+  "version": "0.1.0",
+  "description": "Passive traceability: records who decided what, when, and based on what, without ever intervening.",
+  "author": { "name": "Alberto Martín Fernández" },
+  "repository": "https://github.com/albertomf1979/product-decisions",
+  "license": "MIT",
+  "keywords": ["traceability", "decisions", "adr", "product", "audit"]
+}

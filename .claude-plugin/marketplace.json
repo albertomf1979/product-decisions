@@ -1,0 +1,12 @@
+{
+  "name": "product-decisions",
+  "description": "Passive traceability for products built with coding agents.",
+  "owner": { "name": "Alberto Martín Fernández" },
+  "plugins": [
+    {
+      "name": "product-decisions",
+      "source": "./plugin",
+      "description": "Records who decided what, when, and based on what, without ever intervening."
+    }
+  ]
+}
