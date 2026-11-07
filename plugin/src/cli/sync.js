@@ -12,6 +12,7 @@ function sync({ cwd }) {
   const declared = project.findDeclaration(location.mainRoot);
   if (!declared) throw new UsageError('This project is not declared yet. Run: product-decisions init');
   const config = project.materialize(location, declared);
+  require('../worker/render.js').refreshFolder({ commonDir: location.commonDir });
   console.log(`The folder ${config.folder}/ is up to date.`);
   return 0;
 }

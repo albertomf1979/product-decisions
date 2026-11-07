@@ -25,6 +25,11 @@ const DICTIONARY = {
     more: 'More', changes_title: 'Change index', sources_title: 'Sources inventory', file: 'File', change: 'Change', lines: 'Lines',
     files: 'Files', urls: 'Web pages', mcp: 'MCP servers and tools', issues: 'Issues', prs: 'Pull requests', used_in: 'used in',
     status_modified: 'modified', status_added: 'added', status_deleted: 'deleted', status_renamed: 'renamed', status_untracked: 'new',
+    status_restored: 'restored',
+    doc_change_title: 'Change in {path}', doc_change_note: 'Recorded by product-decisions. This record is never rewritten, and the document itself was not touched.',
+    when: 'When', session: 'Session', by: 'By', branch: 'Branch',
+    outside_session: 'Outside a session: no captured action touched this file, so nobody is named.', outside_session_short: 'outside a session',
+    binary_note: 'Binary document: only its hash is recorded, with no diff.',
   },
   es: {
     session_title: 'Sesión {date}, {tool}, {session}',
@@ -50,6 +55,11 @@ const DICTIONARY = {
     more: 'Más', changes_title: 'Índice de cambios', sources_title: 'Inventario de fuentes', file: 'Fichero', change: 'Cambio', lines: 'Líneas',
     files: 'Ficheros', urls: 'Páginas web', mcp: 'Servidores y herramientas MCP', issues: 'Issues', prs: 'Pull requests', used_in: 'usado en',
     status_modified: 'modificado', status_added: 'añadido', status_deleted: 'borrado', status_renamed: 'renombrado', status_untracked: 'nuevo',
+    status_restored: 'restaurado',
+    doc_change_title: 'Cambio en {path}', doc_change_note: 'Registrado por product-decisions. Este registro nunca se reescribe, y el documento no se tocó.',
+    when: 'Cuándo', session: 'Sesión', by: 'Por', branch: 'Rama',
+    outside_session: 'Fuera de una sesión: ninguna acción capturada tocó este fichero, así que no se nombra a nadie.', outside_session_short: 'fuera de una sesión',
+    binary_note: 'Documento binario: solo se registra su hash, sin diff.',
   },
 };
 

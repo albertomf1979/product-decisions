@@ -95,7 +95,13 @@ async function declareOrJoin(location, flags, authorName) {
     throw new UsageError(`A path named "${config.folder}" already exists in this project. Choose another name with --folder.`);
   }
   const commit = project.declare(location, config, authorName);
-  return { joined: false, config: project.materialize(location, commit) };
+  const materialized = project.materialize(location, commit);
+  const { declareBaseline } = require('../worker/documents.js');
+  const { overlayDir } = require('../worker/render.js');
+  for (const rel of materialized.tracked_documents) {
+    declareBaseline({ location, commonDir: location.commonDir, path: rel, overlayDir: overlayDir(location.commonDir) });
+  }
+  return { joined: false, config: materialized };
 }
 
 function report(result) {
@@ -163,6 +169,7 @@ async function init({ cwd, flags }) {
   });
   writeLocal(location.commonDir, state);
   report(await declareOrJoin(location, flags, state.actor_name));
+  require('../worker/render.js').refreshFolder({ commonDir: location.commonDir });
   console.log('Activated. Sessions here are captured from now on, including any already open.');
   return 0;
 }

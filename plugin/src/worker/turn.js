@@ -17,8 +17,6 @@ const { resolveCommit, newCommits } = require('./commits.js');
 const { readTranscriptTail } = require('./enrich.js');
 const { sealFile } = require('./seal.js');
 
-/** Steps a later task adds: document tracking. */
-const steps = { documents: null };
 
 function readEvents(file) {
   const lines = fs.readFileSync(file, 'utf8').split('\n');
@@ -89,7 +87,12 @@ async function runTurn(job, { commonDir, now = new Date() }) {
     }
   }
 
-  if (steps.documents) await steps.documents({ job, commonDir, state, location, git, events, now });
+  if (location) {
+    const { checkDocuments } = require('./documents.js');
+    const { readConfig } = require('../core/config.js');
+    const { overlayDir } = require('./render.js');
+    checkDocuments({ location, commonDir, config: readConfig(commonDir), state, job, events: readEvents(file), git, overlayDir: overlayDir(commonDir), now });
+  }
   sealFile(file, { now });
   require('./render.js').refreshFolder({ commonDir });
 }
@@ -122,4 +125,4 @@ async function recoverSessions({ commonDir }) {
   return jobs;
 }
 
-module.exports = { runTurn, recoverSessions, steps };
+module.exports = { runTurn, recoverSessions };
