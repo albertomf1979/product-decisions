@@ -48,14 +48,26 @@ function toolStats(store) {
     return tools;
   }
   for (const tool of toolDirs.filter((name) => name !== 'cli')) {
-    const stats = { sessions: 0, events: 0, last_event_at: null };
+    const stats = { sessions: 0, events: 0, derived: 0, last_event_at: null };
     for (const file of walk(path.join(rawDir, tool))) {
-      const lines = completeLines(file);
       stats.sessions += 1;
-      stats.events += lines.length;
-      const last = lines.length ? timestampOf(lines[lines.length - 1], 'timestamp') : null;
-      // Compared as instants, because timestamps can carry different offsets.
-      if (last && (!stats.last_event_at || new Date(last) > new Date(stats.last_event_at))) stats.last_event_at = last;
+      for (const line of completeLines(file)) {
+        let event;
+        try {
+          event = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        // Captured events are what the hooks saw; derived ones are the worker's additions.
+        if (event.origin === 'derived') {
+          stats.derived += 1;
+          continue;
+        }
+        stats.events += 1;
+        const at = event.timestamp;
+        // Compared as instants, because timestamps can carry different offsets.
+        if (at && (!stats.last_event_at || new Date(at) > new Date(stats.last_event_at))) stats.last_event_at = at;
+      }
     }
     tools[tool] = stats;
   }

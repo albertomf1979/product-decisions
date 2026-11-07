@@ -73,11 +73,19 @@ function walk(dir) {
 
 const storeOf = (root) => path.join(root, '.git', 'product-decisions');
 
-/** Parses every captured event under a repository's store. */
-function capturedEvents(root) {
-  return walk(path.join(storeOf(root), 'raw')).flatMap((file) =>
+/**
+ * Parses the captured events under a repository's store. By default only events the
+ * hooks and the CLI wrote: the detached worker may be adding derived events and seals
+ * while a test runs. Pass { all: true } to include them.
+ */
+function capturedEvents(root, { all = false } = {}) {
+  const events = walk(path.join(storeOf(root), 'raw')).flatMap((file) =>
     fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line)));
+  return all ? events : events.filter((event) => event.origin !== 'derived');
 }
+
+/** The text of the record only, without the worker's local operational state. */
+const recordText = (root) => walk(path.join(storeOf(root), 'raw')).map((file) => fs.readFileSync(file, 'latin1')).join('\n');
 
 /** All text under the store, to prove something is absent. */
 const storeText = (root) => walk(storeOf(root)).map((file) => fs.readFileSync(file, 'latin1')).join('\n');
@@ -90,5 +98,5 @@ function copyPlugin(base, name) {
 }
 
 module.exports = {
-  HOOK, factor, runHook, runHookAsync, assertSilent, fixtureNames, fixture, walk, storeOf, capturedEvents, storeText, copyPlugin,
+  HOOK, factor, runHook, runHookAsync, assertSilent, fixtureNames, fixture, walk, storeOf, capturedEvents, storeText, recordText, copyPlugin,
 };

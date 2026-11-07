@@ -33,7 +33,7 @@ function seed(root, cwd = root) {
   fs.appendFileSync(file(root), `${JSON.stringify(event)}\n`);
 }
 const job = (root, over = {}) => ({ kind: 'turn', tool: 'claude-code', sessionId: 's1', cwd: root, transcriptPath: TRANSCRIPT, ...over });
-const ofType = (root, type) => capturedEvents(root).filter((e) => e.event_type === type);
+const ofType = (root, type) => capturedEvents(root, { all: true }).filter((e) => e.event_type === type);
 const commit = (root, message) => { git(root, 'add', '-A'); git(root, 'commit', '-q', '-m', message); return git(root, 'rev-parse', 'HEAD'); };
 
 test('a change made through the shell appears in file_changes', async (t) => {
@@ -189,7 +189,7 @@ test('events are written with origin derived and the session id of the job', asy
   seed(root);
   fs.writeFileSync(path.join(root, 'notes.md'), 'new\n');
   await runTurn(job(root), { commonDir: common(root) });
-  for (const event of capturedEvents(root).filter((e) => e.event_type !== 'user_prompt')) {
+  for (const event of capturedEvents(root, { all: true }).filter((e) => e.event_type !== 'user_prompt')) {
     assert.equal(event.origin, 'derived');
     assert.equal(event.session_id, 's1');
     assert.deepEqual(event.actor, { type: 'plugin', name: 'product-decisions' });
@@ -200,7 +200,7 @@ test('each turn ends with a seal, and the record verifies', async (t) => {
   const root = setup(t);
   seed(root);
   await runTurn(job(root), { commonDir: common(root) });
-  const events = capturedEvents(root);
+  const events = capturedEvents(root, { all: true });
   assert.equal(events[events.length - 1].event_type, 'seal');
   assert.deepEqual(verifyFile(file(root)).problems, []);
 });
@@ -256,7 +256,7 @@ test('a paused repository is left alone', async (t) => {
   seed(root);
   fs.writeFileSync(path.join(root, 'notes.md'), 'new\n');
   await runTurn(job(root), { commonDir: common(root) });
-  assert.equal(capturedEvents(root).length, 1);
+  assert.equal(capturedEvents(root, { all: true }).length, 1);
 });
 
 test('recovery finds sessions with unsealed events', async (t) => {

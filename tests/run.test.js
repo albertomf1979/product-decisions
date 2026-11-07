@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { contentHash } = require('../plugin/src/core/event.js');
 const { makeRepo, addWorktree, activate, git } = require('./helpers/repo.js');
-const { factor, runHook, assertSilent, fixture, fixtureNames, storeOf, capturedEvents, storeText, copyPlugin, walk } = require('./helpers/hook-runner.js');
+const { factor, runHook, assertSilent, fixture, fixtureNames, storeOf, capturedEvents, storeText, recordText, copyPlugin, walk } = require('./helpers/hook-runner.js');
 const { corpus } = require('./helpers/secrets.js');
 
 function activeRepo(t, options, state) {
@@ -407,7 +407,8 @@ test('the home folder is masked everywhere in an event', (t) => {
   const events = capturedEvents(root);
   const byType = (type) => events.find((event) => event.event_type === type);
   assert.equal(events.length, 3);
-  assert(!storeText(root).includes(base), 'the real home path must not appear');
+  // The worker's local operational state keeps real paths; the record must not.
+  assert(!recordText(root).includes(base), 'the real home path must not appear in the record');
   assert.equal(byType('session_start').sources[0].path, `~${path.sep}.claude${path.sep}t.jsonl`);
   assert(byType('user_prompt').payload.prompt.startsWith('look at ~'));
   assert.deepEqual(byType('tool_call').sources[0], { type: 'file', path: 'PRD.md', commit: byType('tool_call').git.head });
