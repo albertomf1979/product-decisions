@@ -2,12 +2,11 @@
 
 // Project declaration and joining (PRD ACT-1, ACT-2), shared by init and sync.
 
-const fs = require('node:fs');
-const path = require('node:path');
 const { DOCS_REF, git, readRef, readTreeFiles, readBlob, commitFiles } = require('../git/plumbing.js');
 const { storeDir } = require('../core/state.js');
-const { DEFAULT_CONFIG, writeConfigCopy } = require('../core/config.js');
-const { addExclude, exportFolder } = require('../worker/folder.js');
+const { DEFAULT_CONFIG, sanitizeConfig } = require('../core/config.js');
+const { exportFolder } = require('../worker/folder.js');
+const { folderIsFree, adoptConfig, parseConfig } = require('../worker/adopt.js');
 
 const REMOTE_DOCS = 'refs/remotes/origin/product-decisions/docs';
 
@@ -37,23 +36,15 @@ function treeFiles(cwd, commit) {
   return files;
 }
 
-function configAt(cwd, commit) {
+/** The raw config.json of a docs commit, parsed but not yet checked. */
+function teamConfigAt(cwd, commit) {
   const sha = readTreeFiles(cwd, commit).get('config.json');
-  if (!sha) return { ...DEFAULT_CONFIG };
-  return { ...DEFAULT_CONFIG, ...JSON.parse(readBlob(cwd, sha).toString('utf8')) };
+  return sha ? parseConfig(readBlob(cwd, sha)) : null;
 }
 
-/** Whether a folder name is free: neither tracked nor present, except as our own export. */
-function folderIsFree(location, folder) {
-  if (git(['ls-files', '--', folder], { cwd: location.mainRoot }).stdout.length > 0) return false;
-  const full = path.join(location.mainRoot, folder);
-  if (!fs.existsSync(full)) return true;
-  try {
-    const manifest = JSON.parse(fs.readFileSync(path.join(storeDir(location.commonDir), 'state', 'export-manifest.json'), 'utf8'));
-    return Array.isArray(manifest);
-  } catch {
-    return false;
-  }
+/** The checked config of a docs commit. */
+function configAt(cwd, commit) {
+  return sanitizeConfig(teamConfigAt(cwd, commit), DEFAULT_CONFIG).config;
 }
 
 /** Creates the docs branch with config.json. */
@@ -73,13 +64,25 @@ function adopt(location, commit) {
   if (!readRef(location.mainRoot, DOCS_REF)) git(['update-ref', DOCS_REF, commit], { cwd: location.mainRoot });
 }
 
-/** Stores the config copy, excludes the folder, and exports the docs tree into it. */
+/**
+ * Adopts the checked config, excludes the folder, and exports the docs tree into it.
+ *
+ * @returns {{ config: object, rejected: string[], blocked: boolean }} Blocked when the
+ *   team's folder is taken here on a first adoption: nothing was written.
+ */
 function materialize(location, commit) {
-  const config = configAt(location.mainRoot, commit);
-  writeConfigCopy(location.commonDir, config);
-  addExclude(location.commonDir, config.folder);
-  exportFolder({ location, config, files: treeFiles(location.mainRoot, commit) });
-  return config;
+  const adopted = adoptConfig(location, teamConfigAt(location.mainRoot, commit));
+  if (!adopted.blocked) exportFolder({ location, config: adopted.config, files: treeFiles(location.mainRoot, commit) });
+  return adopted;
 }
 
-module.exports = { remoteOf, fetchDocs, findDeclaration, configAt, folderIsFree, declare, adopt, materialize, treeFiles, REMOTE_DOCS };
+/** The message for config values that were not adopted, or null. */
+function rejectionNotice(rejected, config) {
+  if (rejected.length === 0) return null;
+  const folder = rejected.includes('folder') ? ` The folder stays ${config.folder}/, because the shared name is invalid or already taken here.` : '';
+  return `Some shared settings were not adopted on this machine: ${rejected.join(', ')}.${folder}`;
+}
+
+module.exports = {
+  remoteOf, fetchDocs, findDeclaration, configAt, teamConfigAt, folderIsFree, declare, adopt, materialize, rejectionNotice, treeFiles, REMOTE_DOCS,
+};

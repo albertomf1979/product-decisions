@@ -5,25 +5,12 @@ const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 const readline = require('node:readline/promises');
-const { readLocal, writeLocal, machineId } = require('../core/state.js');
+const { readLocal, writeLocal, machineId, storeDir } = require('../core/state.js');
 const { formatTimestamp } = require('../core/event.js');
-const { DEFAULT_CONFIG, validateFolderName } = require('../core/config.js');
+const { DEFAULT_CONFIG, validateFolderName, isSafeRelativePath } = require('../core/config.js');
+const { CONSENT, CONSENT_SHA, consentIsCurrent } = require('../core/consent.js');
 const { UsageError, requireRepo, appendLocalEvent } = require('./shared.js');
 const project = require('./project.js');
-
-const CONSENT = `product-decisions records your agent sessions in this repository.
-
-What is recorded: your prompts, agent responses, and tool inputs and results in
-full, including files the agent reads, plus your Git user name. Secrets are
-redacted by pattern, which is not perfect. When a tool names a file such as
-.env, its content is not stored, but content printed indirectly can be.
-
-Where it goes: first to .git/product-decisions on this machine. Readable documents
-are then published to the branch product-decisions/docs for anyone who can read
-this repository. The full record goes to its own branch only if the repository is
-verified private. In a public repository it stays on this machine.
-
-Change your mind at any time with: product-decisions pause`;
 
 function gitUserName(cwd) {
   try {
@@ -77,8 +64,61 @@ function checkFlags(location, flags) {
   if (flags.folder !== undefined && !validateFolderName(flags.folder)) {
     throw new UsageError(`"${flags.folder}" is not a valid folder name. Use one plain name, such as product-decisions.`);
   }
+  flags.track = flags.track.map((file) => path.posix.normalize(String(file).split(path.sep).join('/')));
   for (const file of flags.track) {
-    if (!fs.existsSync(path.join(location.mainRoot, file))) throw new UsageError(`Cannot track ${file}: there is no such file in this repository.`);
+    if (!isSafeRelativePath(file) || !fs.existsSync(path.join(location.mainRoot, file))) {
+      throw new UsageError(`Cannot track ${file}: there is no such file in this repository.`);
+    }
+  }
+}
+
+/**
+ * Where this repository pushes, and whether those places are public, from the last
+ * known answers. Read only: nothing is written before consent.
+ */
+async function visibilityNotice(location) {
+  const { remoteOf, pushUrls } = require('../worker/publish.js');
+  const { checkVisibility } = require('../worker/visibility.js');
+  const remote = remoteOf(location.mainRoot);
+  if (!remote) return null;
+  let known = {};
+  try {
+    known = JSON.parse(fs.readFileSync(path.join(storeDir(location.commonDir), 'state', 'visibility.json'), 'utf8'));
+  } catch {
+    // Not checked before.
+  }
+  const cache = { get: (key) => known[key], set: () => {} };
+  const values = [];
+  for (const url of pushUrls(location.mainRoot, remote.name)) values.push(await checkVisibility(url, { cache }));
+  if (values.includes('public')) return 'This repository is public, so its documents will be public. The full record stays on this machine.';
+  if (values.length === 0 || values.some((v) => v !== 'private')) return 'The visibility of this repository could not be verified, so the full record stays on this machine until it is.';
+  return null;
+}
+
+/** Shows the consent text and returns how it was accepted, or null when it was not. */
+async function askConsent(location, flags) {
+  const notice = await visibilityNotice(location);
+  if (notice) console.log(`${notice}\n`);
+  console.log(`${CONSENT}\n`);
+  if (flags.yes) return 'flag';
+  if (!process.stdin.isTTY) {
+    throw new UsageError('Consent is required. Run in a terminal to answer, or pass --yes to accept the text above.');
+  }
+  const answer = await ask('Activate capture on this machine? [y/N] ');
+  if (!/^y(es)?$/i.test(answer || '')) {
+    console.log('Nothing was activated.');
+    return null;
+  }
+  return 'interactive';
+}
+
+/** Publishes under the worker lock, so it never races a running worker. */
+async function publishNow(location) {
+  const { withLock } = require('../worker/queue.js');
+  try {
+    await withLock(location.commonDir, () => require('../worker/publish.js').publish({ commonDir: location.commonDir }));
+  } catch {
+    // Publication is retried by the worker; activation does not depend on it.
   }
 }
 
@@ -86,29 +126,38 @@ function checkFlags(location, flags) {
 async function declareOrJoin(location, flags, authorName) {
   const existing = project.findDeclaration(location.mainRoot);
   if (existing) {
+    const adopted = project.materialize(location, existing);
+    if (adopted.blocked) throw new UsageError(takenFolder(adopted.config.folder));
     project.adopt(location, existing);
-    const config = project.materialize(location, existing);
-    return { joined: true, config };
+    return { joined: true, config: adopted.config, rejected: adopted.rejected };
   }
   const config = await newConfig(location, flags);
   if (!project.folderIsFree(location, config.folder)) {
     throw new UsageError(`A path named "${config.folder}" already exists in this project. Choose another name with --folder.`);
   }
   const commit = project.declare(location, config, authorName);
-  const materialized = project.materialize(location, commit);
+  const materialized = project.materialize(location, commit).config;
   const { declareBaseline } = require('../worker/documents.js');
   const { overlayDir } = require('../worker/render.js');
   for (const rel of materialized.tracked_documents) {
     declareBaseline({ location, commonDir: location.commonDir, path: rel, overlayDir: overlayDir(location.commonDir) });
   }
-  return { joined: false, config: materialized };
+  return { joined: false, config: materialized, rejected: [] };
 }
+
+const takenFolder = (folder) => `The team's documents use the folder name "${folder}", but a path with that name already exists here. Move it aside, then run init again.`;
 
 function report(result) {
   console.log(result.joined
     ? `Joined the project. Its documents are in the folder ${result.config.folder}/.`
     : `Declared the project. Its documents will appear in the folder ${result.config.folder}/.`);
+  const notice = project.rejectionNotice(result.rejected || [], result.config);
+  if (notice) console.log(notice);
 }
+
+const pushReport = (on) => console.log(on
+  ? 'Publishing from this machine is on.'
+  : 'Publishing from this machine is off: everything stays here. Run init again without --no-push to turn it on.');
 
 /** Activates capture for this person on this clone, after explicit consent. */
 async function init({ cwd, flags }) {
@@ -120,33 +169,37 @@ async function init({ cwd, flags }) {
     console.log(existing.paused
       ? 'product-decisions is active in this repository, but paused. Run: product-decisions resume'
       : 'product-decisions is already active in this repository.');
-    if (!project.findDeclaration(location.mainRoot) || !fs.existsSync(path.join(location.commonDir, 'product-decisions', 'config.json'))) {
+    let state = { ...existing, main_root: location.mainRoot, push_enabled: !flags.noPush };
+    if (!consentIsCurrent(existing)) {
+      // The text changed since this person accepted it: nothing is published until they accept the new one.
+      console.log('The consent text has changed since you accepted it.\n');
+      const method = await askConsent(location, flags);
+      if (!method) return 0;
+      appendLocalEvent(location, existing, cwd, {
+        eventType: 'consent',
+        summary: `Consent renewed by ${existing.actor_name}`,
+        payload: { statement: CONSENT, method },
+      });
+      state = { ...state, consent_sha: CONSENT_SHA };
+    }
+    if (!state.salt) state.salt = crypto.randomBytes(32).toString('hex');
+    writeLocal(location.commonDir, state);
+    if (!project.findDeclaration(location.mainRoot) || !fs.existsSync(path.join(storeDir(location.commonDir), 'config.json'))) {
       report(await declareOrJoin(location, flags, existing.actor_name));
     }
-    if (!existing.salt) writeLocal(location.commonDir, { ...existing, salt: crypto.randomBytes(32).toString('hex') });
+    pushReport(state.push_enabled);
     return 0;
   }
 
-  // Before asking anything, make sure the folder is usable.
+  // Before asking anything, make sure the folder is usable, also when joining.
   const declared = project.findDeclaration(location.mainRoot);
   const folder = declared ? project.configAt(location.mainRoot, declared).folder : (flags.folder ?? DEFAULT_CONFIG.folder);
-  if (!project.folderIsFree(location, folder) && !declared) {
-    throw new UsageError(`A path named "${folder}" already exists in this project. Choose another name with --folder.`);
+  if (!project.folderIsFree(location, folder)) {
+    throw new UsageError(declared ? takenFolder(folder) : `A path named "${folder}" already exists in this project. Choose another name with --folder.`);
   }
 
-  console.log(`${CONSENT}\n`);
-  let method = 'flag';
-  if (!flags.yes) {
-    if (!process.stdin.isTTY) {
-      throw new UsageError('Consent is required. Run in a terminal to answer, or pass --yes to accept the text above.');
-    }
-    const answer = await ask('Activate capture on this machine? [y/N] ');
-    if (!/^y(es)?$/i.test(answer || '')) {
-      console.log('Nothing was activated.');
-      return 0;
-    }
-    method = 'interactive';
-  }
+  const method = await askConsent(location, flags);
+  if (!method) return 0;
 
   const name = gitUserName(cwd);
   if (!name) console.error('Warning: Git user.name is not set, so events will name you as "unknown".');
@@ -160,6 +213,9 @@ async function init({ cwd, flags }) {
     paused_at: null,
     redact_patterns: [],
     salt: crypto.randomBytes(32).toString('hex'),
+    consent_sha: CONSENT_SHA,
+    push_enabled: !flags.noPush,
+    main_root: location.mainRoot,
   };
   // The consent record comes first: if it cannot be written, nothing is activated.
   appendLocalEvent(location, state, cwd, {
@@ -172,13 +228,8 @@ async function init({ cwd, flags }) {
   report(result);
   require('../worker/render.js').refreshFolder({ commonDir: location.commonDir });
   // Publishing the declaration lets teammates join it instead of declaring their own.
-  if (!result.joined && !flags.noPush) {
-    try {
-      await require('../worker/publish.js').publish({ commonDir: location.commonDir });
-    } catch {
-      // Publication is retried by the worker; activation does not depend on it.
-    }
-  }
+  if (!result.joined && state.push_enabled) await publishNow(location);
+  pushReport(state.push_enabled);
   console.log('Activated. Sessions here are captured from now on, including any already open.');
   return 0;
 }

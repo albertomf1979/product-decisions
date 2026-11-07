@@ -18,6 +18,7 @@ async function runWorker({ commonDir, jobs, log = () => {} }) {
       const pending = takePending(commonDir).filter((job) => !failed.has(job.file + job.raw));
       if (pending.length === 0) break;
       for (const job of pending) {
+        release.refresh();
         try {
           if (job.kind === 'recover') {
             for (const found of await jobs.recover({ commonDir })) enqueue(commonDir, found);
@@ -34,6 +35,7 @@ async function runWorker({ commonDir, jobs, log = () => {} }) {
       }
     }
     if (publish) {
+      release.refresh();
       try {
         await jobs.publish({ commonDir });
       } catch (err) {

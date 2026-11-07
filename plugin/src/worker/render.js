@@ -5,7 +5,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { locateRepo } = require('../core/locate.js');
+const { locateStore } = require('../core/locate.js');
 const { readLocal, storeDir } = require('../core/state.js');
 const { readConfig } = require('../core/config.js');
 const { DOCS_REF, readRef, readTreeFiles, readBlob } = require('../git/plumbing.js');
@@ -54,12 +54,33 @@ function gapsOf(commonDir, machine) {
 
 const overlayDir = (commonDir) => path.join(storeDir(commonDir), 'state', 'docs-overlay');
 
+const isText = (v) => typeof v === 'string';
+const isList = (v, item) => Array.isArray(v) && v.every((x) => x !== null && typeof x === 'object' && item(x));
+
+/**
+ * A session data file from the shared branch is used only when it has the shape this
+ * version writes: one damaged or newer file must not stop anyone's indexes.
+ */
+function isSessionData(d) {
+  return Boolean(d) && d.schema_version === 1 && isText(d.tool) && isText(d.session) && isText(d.started)
+    && isText(d.file) && d.file.startsWith('timeline/') && Number.isFinite(d.event_count)
+    && isList(d.actors, (a) => isText(a.type) && isText(a.name))
+    && isList(d.files, (f) => isText(f.path) && isText(f.status))
+    && isList(d.commits, (c) => isText(c.sha) && isText(c.subject))
+    && isList(d.sources, (s) => isText(s.type) && Array.isArray(s.event_ids));
+}
+
+function isDocumentChange(d) {
+  return Boolean(d) && isText(d.at) && isText(d.path) && isText(d.actor) && isText(d.file) && d.file.startsWith('01-definition/');
+}
+
 /**
  * @returns {Map<string, Buffer>} The full docs tree as this machine sees it.
  */
 function buildDocsFiles({ location, commonDir, state, config, bases = [] }) {
   const files = new Map();
-  // Later bases win for the same path; each machine's own files are added on top.
+  // Later bases win for the same path, so a publish passes the remote tip last: other
+  // machines' files are newest there. This machine's own files are added on top.
   for (const base of bases.filter(Boolean)) {
     for (const [file, sha] of readTreeFiles(location.mainRoot, base)) files.set(file, readBlob(location.mainRoot, sha));
   }
@@ -76,8 +97,9 @@ function buildDocsFiles({ location, commonDir, state, config, bases = [] }) {
   const documentChanges = [];
   for (const [file, content] of files) {
     try {
-      if (file.startsWith('.data/sessions/')) sessions.push(JSON.parse(content.toString('utf8')));
-      if (file.startsWith('.data/documents/')) documentChanges.push(JSON.parse(content.toString('utf8')));
+      const data = file.startsWith('.data/') ? JSON.parse(content.toString('utf8')) : null;
+      if (file.startsWith('.data/sessions/') && isSessionData(data)) sessions.push(data);
+      if (file.startsWith('.data/documents/') && isDocumentChange(data)) documentChanges.push(data);
     } catch {
       // A damaged data file is skipped, not fatal.
     }
@@ -89,7 +111,7 @@ function buildDocsFiles({ location, commonDir, state, config, bases = [] }) {
 /** Refreshes the local folder. Does nothing until the project is declared. */
 function refreshFolder({ commonDir }) {
   const state = readLocal(commonDir);
-  const location = locateRepo(path.dirname(commonDir));
+  const location = locateStore(commonDir, state);
   if (!state || !location) return null;
   const base = readRef(location.mainRoot, DOCS_REF);
   if (!base) return null;
@@ -99,4 +121,4 @@ function refreshFolder({ commonDir }) {
   return files;
 }
 
-module.exports = { buildDocsFiles, refreshFolder, ownSessions, overlayDir, walk };
+module.exports = { buildDocsFiles, refreshFolder, ownSessions, overlayDir, walk, isSessionData };

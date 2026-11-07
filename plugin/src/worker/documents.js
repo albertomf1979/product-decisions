@@ -12,6 +12,7 @@ const { appendLine, rawFilePath } = require('../core/store.js');
 const { buildEvent, formatTimestamp } = require('../core/event.js');
 const { redactString, compileExtra } = require('../core/redact.js');
 const { git } = require('../git/plumbing.js');
+const { isSafeRelativePath } = require('../core/config.js');
 const { t } = require('../synth/deterministic/i18n.js');
 const { code } = require('../synth/deterministic/excerpt.js');
 
@@ -58,6 +59,7 @@ function writeOnce(file, content) {
 
 /** Copies the document as it now stands, the "original" changes are measured against (DOC-3). */
 function declareBaseline({ location, commonDir, path: rel, overlayDir }) {
+  if (!isSafeRelativePath(rel)) return;
   const content = readOrNull(path.join(location.mainRoot, rel));
   if (content === null) return;
   writeOnce(path.join(overlayDir, '01-definition', 'baseline', nameOf(rel)), content);
@@ -86,13 +88,17 @@ function diffOf(location, commonDir, before, after) {
 const normalizePath = (p) => String(p).split(/[\\/]/).join('/');
 
 /** The captured actions on this document since its last recorded change. */
+// Tools that write a file they name. Reading a document does not make a session its author.
+const EDITING_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
+
 function actionsOn(rel, events) {
   let since = 0;
   events.forEach((event, i) => {
     if (event.event_type === 'document_change' && event.payload.path === rel) since = i + 1;
   });
   return events.slice(since).filter((event) => {
-    const input = event.payload && event.payload.tool_input;
+    if (!event.payload || !EDITING_TOOLS.has(event.payload.tool_name)) return false;
+    const input = event.payload.tool_input;
     if (!input || typeof input !== 'object') return false;
     return [input.file_path, input.path, input.notebook_path].some((p) => {
       if (typeof p !== 'string') return false;
@@ -129,7 +135,7 @@ function renderRecord({ lang, rel, at, status, job, actions, git: gitInfo, conte
 function checkDocuments({ location, commonDir, config, state, job, events, git: gitInfo, overlayDir, now = new Date() }) {
   const extra = compileExtra([...(state.redact_patterns || []), ...(config.redact_patterns || [])]);
   const home = os.homedir();
-  for (const rel of config.tracked_documents || []) {
+  for (const rel of (config.tracked_documents || []).filter(isSafeRelativePath)) {
     try {
       const current = readOrNull(path.join(location.worktreeRoot, rel));
       const previous = known(commonDir, rel);

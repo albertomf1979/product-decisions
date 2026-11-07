@@ -61,4 +61,35 @@ function locateRepo(startDir) {
   }
 }
 
-module.exports = { locateRepo };
+function samePath(a, b) {
+  const real = (p) => {
+    try {
+      return fs.realpathSync.native(p);
+    } catch {
+      return path.resolve(p);
+    }
+  };
+  return real(a) === real(b);
+}
+
+/**
+ * Finds the repository a store belongs to, from its common directory. A submodule's
+ * common directory lives inside the superproject's, so the parent folder is not enough:
+ * the main checkout recorded at init comes first, and every answer must lead back to
+ * the same common directory, or there is none.
+ *
+ * @param {string} commonDir
+ * @param {{ main_root?: string } | null} [state]
+ */
+function locateStore(commonDir, state) {
+  const candidates = [];
+  if (state && typeof state.main_root === 'string') candidates.push(state.main_root);
+  if (path.basename(commonDir) === '.git') candidates.push(path.dirname(commonDir));
+  for (const dir of candidates) {
+    const found = locateRepo(dir);
+    if (found && samePath(found.commonDir, commonDir)) return found;
+  }
+  return null;
+}
+
+module.exports = { locateRepo, locateStore, samePath };

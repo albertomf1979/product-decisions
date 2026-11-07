@@ -30,14 +30,16 @@ function httpsGet(url, timeoutMs = 5000) {
 
 /**
  * @param {string} url The remote's URL.
- * @param {{ request?: Function, cache?: { get: Function, set: Function }, now?: number }} options
+ * @param {{ request?: Function, cache?: { get: Function, set: Function }, fresh?: boolean, now?: number }} options
+ *   With `fresh`, the cache is written but never read: a repository made public since
+ *   the last check must stop the raw record at once.
  * @returns {Promise<'private' | 'public' | 'unknown'>}
  */
-async function checkVisibility(url, { request = httpsGet, cache, now = Date.now() } = {}) {
+async function checkVisibility(url, { request = httpsGet, cache, fresh = false, now = Date.now() } = {}) {
   const repo = parseGitHub(url);
   if (!repo) return 'unknown';
   const key = `${repo.owner}/${repo.repo}`.toLowerCase();
-  const cached = cache && cache.get(key);
+  const cached = cache && !fresh && cache.get(key);
   if (cached && now - cached.at < DAY) return cached.value;
   let value = 'unknown';
   try {

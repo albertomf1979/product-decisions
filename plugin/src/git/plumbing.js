@@ -22,22 +22,46 @@ const SAFE_CONFIG = [
   '-c', 'tag.gpgsign=false',
   '-c', 'core.fsmonitor=false',
   '-c', 'gc.auto=0',
+  '-c', 'maintenance.auto=false',
+  '-c', 'credential.interactive=false',
+  // A stalled HTTP transfer gives up instead of hanging.
+  '-c', 'http.lowSpeedLimit=1000',
+  '-c', 'http.lowSpeedTime=60',
 ];
+
+// An empty GIT_ASKPASS wins over core.askPass and SSH_ASKPASS, and with terminal prompts
+// off Git fails instead of asking. The worker runs without a terminal, so SSH cannot ask
+// either. Credential helpers still answer from their stores, without windows.
+const QUIET_ENV = {
+  GIT_TERMINAL_PROMPT: '0',
+  GIT_OPTIONAL_LOCKS: '0',
+  GIT_ASKPASS: '',
+  SSH_ASKPASS: '',
+  SSH_ASKPASS_REQUIRE: 'never',
+  GCM_INTERACTIVE: 'never',
+};
+
+const NETWORK = new Set(['fetch', 'push', 'ls-remote']);
+const LOCAL_TIMEOUT_MS = 120000;
+const NETWORK_TIMEOUT_MS = 600000;
 
 /**
  * Runs Git with the safe configuration.
  *
  * @param {string[]} args
  * @param {{ cwd: string, env?: object, input?: Buffer | string, allowFail?: boolean }} options
+ *   A call that times out throws, even with allowFail.
  * @returns {{ status: number, stdout: Buffer }}
  */
 function git(args, { cwd, env = {}, input, allowFail = false }) {
   const result = spawnSync('git', [...SAFE_CONFIG, ...args], {
     cwd,
     input,
-    env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', ...env },
+    env: { ...process.env, ...QUIET_ENV, ...env },
     maxBuffer: 1024 * 1024 * 1024,
     windowsHide: true,
+    timeout: NETWORK.has(args[0]) ? NETWORK_TIMEOUT_MS : LOCAL_TIMEOUT_MS,
+    killSignal: 'SIGKILL',
   });
   if (result.error) throw result.error;
   if (result.status !== 0 && !allowFail) {

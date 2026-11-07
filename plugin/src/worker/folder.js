@@ -22,11 +22,19 @@ function addExclude(commonDir, folder) {
 
 const manifestPath = (commonDir) => path.join(storeDir(commonDir), 'state', 'export-manifest.json');
 
+/**
+ * What the last export wrote: the folder and its files. An older manifest is a bare
+ * list of files, with no folder name.
+ *
+ * @returns {{ folder: string | null, files: string[] }}
+ */
 function readManifest(commonDir) {
   try {
-    return JSON.parse(fs.readFileSync(manifestPath(commonDir), 'utf8'));
+    const value = JSON.parse(fs.readFileSync(manifestPath(commonDir), 'utf8'));
+    if (Array.isArray(value)) return { folder: null, files: value };
+    return { folder: typeof value.folder === 'string' ? value.folder : null, files: Array.isArray(value.files) ? value.files : [] };
   } catch {
-    return [];
+    return { folder: null, files: [] };
   }
 }
 
@@ -58,7 +66,10 @@ function exportFolder({ location, config, files }) {
   }
 
   const written = new Set(entries.map(([, file]) => file));
-  for (const old of readManifest(location.commonDir)) {
+  const previous = readManifest(location.commonDir);
+  // After a folder change the old folder is left as it is: its files are not this folder's.
+  const stale = previous.folder === null || previous.folder === config.folder ? previous.files : [];
+  for (const old of stale) {
     if (written.has(old)) continue;
     try {
       fs.rmSync(target(old), { force: true });
@@ -67,7 +78,7 @@ function exportFolder({ location, config, files }) {
     }
   }
   fs.mkdirSync(path.dirname(manifestPath(location.commonDir)), { recursive: true, mode: 0o700 });
-  fs.writeFileSync(manifestPath(location.commonDir), JSON.stringify([...written].sort()));
+  fs.writeFileSync(manifestPath(location.commonDir), JSON.stringify({ folder: config.folder, files: [...written].sort() }));
 }
 
-module.exports = { addExclude, exportFolder };
+module.exports = { addExclude, exportFolder, readManifest };

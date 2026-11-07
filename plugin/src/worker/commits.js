@@ -10,17 +10,21 @@ function resolveCommit(cwd, ref) {
 }
 
 /**
- * Commits made since the session started, oldest first.
+ * Commits made since the session started and no later than `until`, oldest first.
+ * The bound keeps a session that is processed late from collecting work done after it.
  *
+ * @param {{ worktreeRoot: string, sinceHead: string | null, until?: string | null }} options
+ *   `until` is an ISO timestamp, compared with the committer date to the second.
  * @returns {Array<{ sha: string, subject: string, files: string[] }>}
  */
-function newCommits({ worktreeRoot, sinceHead }) {
+function newCommits({ worktreeRoot, sinceHead, until = null }) {
   if (!resolveCommit(worktreeRoot, 'HEAD')) return [];
   const range = sinceHead ? `${sinceHead}..HEAD` : 'HEAD';
-  const list = git(['rev-list', '--reverse', range], { cwd: worktreeRoot, allowFail: true });
+  const bound = until && Number.isFinite(Date.parse(until)) ? [`--until=${Math.floor(Date.parse(until) / 1000)}`] : [];
+  const list = git(['rev-list', '--reverse', ...bound, range], { cwd: worktreeRoot, allowFail: true });
   if (list.status !== 0) return [];
   return list.stdout.toString('utf8').split('\n').filter(Boolean).map((sha) => {
-    const subject = git(['show', '--no-patch', '--format=%s', sha], { cwd: worktreeRoot }).stdout.toString('utf8').trim();
+    const subject = git(['show', '--no-patch', '--no-show-signature', '--format=%s', sha], { cwd: worktreeRoot }).stdout.toString('utf8').trim();
     const files = git(['diff-tree', '--no-commit-id', '--name-only', '-r', '-z', '--root', sha], { cwd: worktreeRoot })
       .stdout.toString('utf8').split('\0').filter(Boolean);
     return { sha, subject, files };

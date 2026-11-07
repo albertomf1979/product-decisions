@@ -5,13 +5,14 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { locateRepo } = require('../core/locate.js');
+const { locateStore } = require('../core/locate.js');
 const { readLocal, storeDir } = require('../core/state.js');
-const { readConfig, writeConfigCopy, DEFAULT_CONFIG } = require('../core/config.js');
+const { readConfig } = require('../core/config.js');
 const { formatTimestamp } = require('../core/event.js');
 const { DOCS_REF, RAW_REF, git, readRef, readTreeFiles, readBlob, commitFiles } = require('../git/plumbing.js');
 const { checkVisibility, rawAllowed } = require('./visibility.js');
 const { buildDocsFiles, refreshFolder, walk } = require('./render.js');
+const { adoptConfig, parseConfig } = require('./adopt.js');
 
 const TRACKING = {
   [DOCS_REF]: 'refs/remotes/origin/product-decisions/docs',
@@ -38,6 +39,23 @@ function remoteOf(cwd) {
   const name = names.includes('origin') ? 'origin' : names[0];
   const url = git(['remote', 'get-url', name], { cwd, allowFail: true }).stdout.toString('utf8').trim();
   return { name, url };
+}
+
+/** Every URL a push to this remote reaches: its push URLs, or its URLs when it has none. */
+function pushUrls(cwd, name) {
+  return git(['remote', 'get-url', '--push', '--all', name], { cwd, allowFail: true }).stdout.toString('utf8').split('\n').map((u) => u.trim()).filter(Boolean);
+}
+
+/**
+ * The visibility of everywhere a push goes, asked fresh: private only when every
+ * destination is verified private, public when any is public.
+ */
+async function destinationVisibility(urls, visibilityOf, cache) {
+  if (urls.length === 0) return 'unknown';
+  const values = [];
+  for (const url of urls) values.push(await visibilityOf(url, { cache, fresh: true }));
+  if (values.includes('public')) return 'public';
+  return values.every((v) => v === 'private') ? 'private' : 'unknown';
 }
 
 const isAncestor = (cwd, a, b) => git(['merge-base', '--is-ancestor', a, b], { cwd, allowFail: true }).status === 0;
@@ -68,7 +86,7 @@ async function publishRef({ cwd, commonDir, remote, ref, build, authorName, mess
     let commit;
     try {
       commit = commitFiles({
-        cwd, storeDir: storeDir(commonDir), ref, parents, files: build([remoteTip, local]), message, authorName, expected: local,
+        cwd, storeDir: storeDir(commonDir), ref, parents, files: build({ local, remoteTip }), message, authorName, expected: local,
       });
     } catch (err) {
       if (err.code === 'REF_MOVED') continue;
@@ -88,10 +106,13 @@ async function publishRef({ cwd, commonDir, remote, ref, build, authorName, mess
   return 'pending';
 }
 
-/** Own raw files by content, everyone else's by blob, so large records are never read. */
-function rawFiles({ cwd, commonDir, machine, bases }) {
+/**
+ * Own raw files by content, everyone else's by blob, so large records are never read.
+ * The remote tip is applied after the local ref: other machines' files are newest there.
+ */
+function rawFiles({ cwd, commonDir, machine, local, remoteTip }) {
   const files = {};
-  for (const base of bases.filter(Boolean)) {
+  for (const base of [local, remoteTip].filter(Boolean)) {
     for (const [file, sha] of readTreeFiles(cwd, base)) files[file] = { sha };
   }
   const raw = path.join(storeDir(commonDir), 'raw');
@@ -103,13 +124,14 @@ function rawFiles({ cwd, commonDir, machine, bases }) {
 
 /**
  * Publishes the docs and, when the policy allows, the raw record. Without a remote,
- * or with push off, everything is committed locally only.
+ * or with push off, everything is committed locally only. A step that fails is
+ * recorded as pending, never thrown, so status always tells the truth.
  *
  * @returns {Promise<{ remote, visibility, docs, raw, warnings } | null>}
  */
 async function publish({ commonDir, push = true, visibilityOf = checkVisibility, beforePush, now = new Date() }) {
   const state = readLocal(commonDir);
-  const location = locateRepo(path.dirname(commonDir));
+  const location = locateStore(commonDir, state);
   if (!state || !state.activated || !location || !readRef(location.mainRoot, DOCS_REF)) return null;
   const cwd = location.mainRoot;
   const config = readConfig(commonDir);
@@ -124,36 +146,52 @@ async function publish({ commonDir, push = true, visibilityOf = checkVisibility,
   const cliFile = path.join(storeDir(commonDir), 'raw', 'cli', `local-${state.machine}.jsonl`);
   if (fs.existsSync(cliFile)) require('./seal.js').sealFile(cliFile, { now });
 
-  const result = { remote: remote ? remote.name : null, visibility: null, docs: 'local', raw: 'local', warnings: [] };
-  result.docs = await publishRef({
-    cwd, commonDir, remote, ref: DOCS_REF, authorName, message: 'Publish the product decisions record', beforePush,
-    build: ([remoteTip, local]) => {
-      const files = buildDocsFiles({ location, commonDir, state, config, bases: [remoteTip, local] });
-      // The team's declaration wins: someone who declared separately adopts it.
-      const teamConfig = remoteTip && readTreeFiles(cwd, remoteTip).get('config.json');
-      if (teamConfig) {
-        const content = readBlob(cwd, teamConfig);
-        files.set('config.json', content);
-        writeConfigCopy(commonDir, { ...DEFAULT_CONFIG, ...JSON.parse(content.toString('utf8')) });
-      }
-      return Object.fromEntries(files);
-    },
-  });
+  const result = { remote: remote ? remote.name : null, visibility: null, docs: 'local', raw: 'local', warnings: [], rejected: [] };
+  try {
+    result.docs = await publishRef({
+      cwd, commonDir, remote, ref: DOCS_REF, authorName, message: 'Publish the product decisions record', beforePush,
+      build: ({ local, remoteTip }) => {
+        // The team's declaration wins: someone who declared separately adopts what is usable of it.
+        const teamConfig = remoteTip && readTreeFiles(cwd, remoteTip).get('config.json');
+        let current = config;
+        if (teamConfig) {
+          const adopted = adoptConfig(location, parseConfig(readBlob(cwd, teamConfig)));
+          current = adopted.config;
+          result.rejected = adopted.rejected;
+        }
+        const files = buildDocsFiles({ location, commonDir, state, config: current, bases: [local, remoteTip] });
+        if (teamConfig) files.set('config.json', { sha: teamConfig });
+        return Object.fromEntries(files);
+      },
+    });
+  } catch (err) {
+    result.docs = 'pending';
+    result.error = err.code || 'error';
+  }
 
   if (remote) {
-    result.visibility = await visibilityOf(remote.url, { cache });
-    if (rawAllowed(result.visibility, config)) {
-      result.raw = await publishRef({
-        cwd, commonDir, remote, ref: RAW_REF, authorName, message: 'Publish the raw record', beforePush,
-        build: (bases) => rawFiles({ cwd, commonDir, machine: state.machine, bases }),
-      });
-    } else if (result.visibility === 'public') {
-      const listed = git(['ls-remote', remote.name, RAW_REF], { cwd, allowFail: true }).stdout.toString('utf8').trim();
-      if (listed) result.warnings.push('raw_ref_public');
+    try {
+      result.visibility = await destinationVisibility(pushUrls(cwd, remote.name), visibilityOf, cache);
+      if (rawAllowed(result.visibility, config)) {
+        result.raw = await publishRef({
+          cwd, commonDir, remote, ref: RAW_REF, authorName, message: 'Publish the raw record', beforePush,
+          build: ({ local, remoteTip }) => rawFiles({ cwd, commonDir, machine: state.machine, local, remoteTip }),
+        });
+      } else if (result.visibility === 'public') {
+        const listed = git(['ls-remote', remote.name, RAW_REF], { cwd, allowFail: true }).stdout.toString('utf8').trim();
+        if (listed) result.warnings.push('raw_ref_public');
+      }
+    } catch (err) {
+      result.raw = 'pending';
+      result.error = err.code || 'error';
     }
   }
 
-  refreshFolder({ commonDir });
+  try {
+    refreshFolder({ commonDir });
+  } catch {
+    // The folder is refreshed again on the next turn.
+  }
   const previous = readJson(stateFile(commonDir, 'publish.json'), {});
   writeJson(stateFile(commonDir, 'publish.json'), {
     remote: result.remote,
@@ -166,4 +204,4 @@ async function publish({ commonDir, push = true, visibilityOf = checkVisibility,
   return result;
 }
 
-module.exports = { publish, remoteOf };
+module.exports = { publish, remoteOf, pushUrls };

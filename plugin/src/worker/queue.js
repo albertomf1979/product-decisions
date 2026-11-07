@@ -89,33 +89,113 @@ function isAlive(pid) {
   }
 }
 
-function isStale(lock, staleMs) {
+function isStale(text, mtimeMs, staleMs) {
   try {
-    const { pid } = JSON.parse(readText(lock));
-    return Date.now() - fs.statSync(lock).mtimeMs > staleMs || !isAlive(pid);
+    const { pid } = JSON.parse(text);
+    return Date.now() - mtimeMs > staleMs || !isAlive(pid);
   } catch {
     return true;
   }
 }
 
+function tokenOf(text) {
+  try {
+    return JSON.parse(text).token || null;
+  } catch {
+    return null;
+  }
+}
+
 /**
- * @returns {(() => void) | null} A release function, or null when another live worker holds the lock.
+ * Moves a stale lock aside. Only one contender can rename it; if what was moved is no
+ * longer the lock judged stale, someone took it meanwhile, and it is put back.
+ *
+ * @returns {boolean} Whether the stale lock is gone.
+ */
+function clearStale(lock, judged) {
+  const aside = `${lock}.${process.pid}.${crypto.randomBytes(4).toString('hex')}.stale`;
+  try {
+    fs.renameSync(lock, aside);
+  } catch {
+    return false;
+  }
+  if (readText(aside) !== judged) {
+    try {
+      fs.linkSync(aside, lock);
+    } catch {
+      // Someone holds the lock again: theirs stands.
+    }
+    fs.rmSync(aside, { force: true });
+    return false;
+  }
+  fs.rmSync(aside, { force: true });
+  return true;
+}
+
+/**
+ * Takes the worker lock. The returned release removes the lock only while it is still
+ * this holder's, and its `refresh` keeps a long run from looking stale.
+ *
+ * @returns {((() => void) & { refresh: () => void }) | null} Null when another live holder has it.
  */
 function acquireLock(commonDir, { staleMs = 600000 } = {}) {
   const lock = path.join(stateDir(commonDir), 'worker.lock');
   fs.mkdirSync(path.dirname(lock), { recursive: true, mode: 0o700 });
+  const token = crypto.randomBytes(8).toString('hex');
+  const owned = () => tokenOf(readText(lock)) === token;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       const fd = fs.openSync(lock, 'wx', 0o600);
-      fs.writeSync(fd, JSON.stringify({ pid: process.pid, at: Date.now() }));
+      fs.writeSync(fd, JSON.stringify({ pid: process.pid, at: Date.now(), token }));
       fs.closeSync(fd);
-      return () => fs.rmSync(lock, { force: true });
+      const release = () => {
+        if (owned()) fs.rmSync(lock, { force: true });
+      };
+      release.refresh = () => {
+        if (!owned()) return;
+        const now = new Date();
+        try {
+          fs.utimesSync(lock, now, now);
+        } catch {
+          // The next refresh tries again.
+        }
+      };
+      return release;
     } catch (err) {
-      if (err.code !== 'EEXIST' || !isStale(lock, staleMs)) return null;
-      fs.rmSync(lock, { force: true });
+      if (err.code !== 'EEXIST') return null;
+      const text = readText(lock);
+      let mtimeMs = Date.now();
+      try {
+        mtimeMs = fs.statSync(lock).mtimeMs;
+      } catch {
+        continue; // Released meanwhile: try again.
+      }
+      if (text === null || !isStale(text, mtimeMs, staleMs) || !clearStale(lock, text)) return null;
     }
   }
   return null;
 }
 
-module.exports = { enqueue, takePending, finishJob, acquireLock };
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Runs `work` while holding the worker lock, waiting for a running worker first.
+ *
+ * @returns {Promise<{ ran: boolean, value?: unknown }>} ran is false when the lock never came free.
+ */
+async function withLock(commonDir, work, { waitMs = 30000 } = {}) {
+  let release = null;
+  for (let waited = 0; !release; waited += 250) {
+    release = acquireLock(commonDir);
+    if (release) break;
+    if (waited >= waitMs) return { ran: false };
+    await sleep(250);
+  }
+  try {
+    return { ran: true, value: await work(release) };
+  } finally {
+    release();
+  }
+}
+
+module.exports = { enqueue, takePending, finishJob, acquireLock, withLock };

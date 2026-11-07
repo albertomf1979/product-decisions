@@ -34,7 +34,21 @@ function seed(root, cwd = root) {
 }
 const job = (root, over = {}) => ({ kind: 'turn', tool: 'claude-code', sessionId: 's1', cwd: root, transcriptPath: TRANSCRIPT, ...over });
 const ofType = (root, type) => capturedEvents(root, { all: true }).filter((e) => e.event_type === type);
-const commit = (root, message) => { git(root, 'add', '-A'); git(root, 'commit', '-q', '-m', message); return git(root, 'rev-parse', 'HEAD'); };
+// The tool reports the end of the turn after the agent's commit; commits after the
+// last reported event are not the session's.
+function endTurn(root) {
+  const event = buildEvent(
+    { eventType: 'agent_response', actorType: 'llm', llmName: 'claude', agent: { name: 'main' }, payload: { last_assistant_message: 'done' } },
+    { tool: 'claude-code', sessionId: 's1', actorName: null, git: null, sources: [], summary: 'done' },
+  );
+  fs.appendFileSync(file(root), `${JSON.stringify(event)}\n`);
+}
+const commit = (root, message) => {
+  git(root, 'add', '-A');
+  git(root, 'commit', '-q', '-m', message);
+  if (fs.existsSync(file(root))) endTurn(root);
+  return git(root, 'rev-parse', 'HEAD');
+};
 
 test('a change made through the shell appears in file_changes', async (t) => {
   const root = setup(t);
