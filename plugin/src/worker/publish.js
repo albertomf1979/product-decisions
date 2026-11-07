@@ -120,6 +120,10 @@ async function publish({ commonDir, push = true, visibilityOf = checkVisibility,
     set: (key, value) => writeJson(stateFile(commonDir, 'visibility.json'), { ...readJson(stateFile(commonDir, 'visibility.json'), {}), [key]: value }),
   };
 
+  // Consent and pause events live in a file no session job seals; seal it before publishing.
+  const cliFile = path.join(storeDir(commonDir), 'raw', 'cli', `local-${state.machine}.jsonl`);
+  if (fs.existsSync(cliFile)) require('./seal.js').sealFile(cliFile, { now });
+
   const result = { remote: remote ? remote.name : null, visibility: null, docs: 'local', raw: 'local', warnings: [] };
   result.docs = await publishRef({
     cwd, commonDir, remote, ref: DOCS_REF, authorName, message: 'Publish the product decisions record', beforePush,

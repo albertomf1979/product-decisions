@@ -181,7 +181,7 @@ test('status --json reports the agreed shape', (t) => {
   const result = runCli(['status', '--json'], { cwd: root });
   assert.equal(result.status, 0, result.stderr);
   const status = JSON.parse(result.stdout);
-  assert.deepEqual(Object.keys(status).sort(), ['activated', 'actor', 'errors', 'latency', 'paused', 'repo', 'runtime', 'store', 'tools']);
+  assert.deepEqual(Object.keys(status).sort(), ['activated', 'actor', 'capture_hint', 'errors', 'latency', 'paused', 'project', 'publication', 'repo', 'runtime', 'seals', 'store', 'tools']);
   assert.equal(status.repo.root, root);
   assert.equal(status.activated, true);
   assert.equal(status.paused, false);
@@ -194,7 +194,7 @@ test('status --json reports the agreed shape', (t) => {
   assert.equal(status.latency.count, 3);
   assert(status.latency.p50 > 0 && status.latency.p95 >= status.latency.p50);
   assert.deepEqual(status.errors, { count: 0, last_at: null });
-  assert.equal(status.runtime.node, process.version);
+  assert.equal(status.runtime.cli_node, process.version);
   assert.match(status.runtime.git, /\d+\.\d+/);
 });
 
@@ -440,4 +440,60 @@ test('init gives the activated state a private salt', (t) => {
   const { root } = repo(t);
   init(root);
   assert.match(readLocal(common(root)).salt, /^[0-9a-f]{64}$/);
+});
+
+test('status shows the project, publication, and seal state', async (t) => {
+  const { root } = repo(t);
+  runCli(['init', '--yes', '--track', 'PRD.md', '--language', 'es'], { cwd: root });
+  hook(root, 'UserPromptSubmit.json', { session_id: 'st-1' });
+  assert.equal(runCli(['sync', '--no-push'], { cwd: root }).status, 0);
+  const status = JSON.parse(runCli(['status', '--json'], { cwd: root }).stdout);
+  assert.deepEqual(status.project, { declared: true, folder: 'product-decisions', language: 'es', tracked_documents: ['PRD.md'] });
+  assert.equal(status.publication.remote, null);
+  assert.equal(status.publication.docs_pending, false);
+  assert.equal(status.seals.problems, 0);
+  assert.equal(status.seals.unsealed_events, 0);
+  assert(status.seals.sessions >= 1);
+  const text = runCli(['status'], { cwd: root }).stdout;
+  assert.match(text, /Project: declared/);
+  assert.match(text, /no remote/);
+  assert.match(text, /Seals:/);
+});
+
+test('status keeps counting across rotated logs', (t) => {
+  const { root } = repo(t);
+  init(root);
+  const logs = path.join(storeOf(root), 'logs');
+  fs.mkdirSync(logs, { recursive: true });
+  fs.writeFileSync(path.join(logs, 'latency.jsonl.1'), Array.from({ length: 5 }, (_, i) => JSON.stringify({ ms: 10 + i })).join('\n') + '\n');
+  fs.writeFileSync(path.join(logs, 'latency.jsonl'), `${JSON.stringify({ ms: 30 })}\n`);
+  fs.writeFileSync(path.join(logs, 'diagnostics.log.1'), `${JSON.stringify({ ts: 'a' })}\n${JSON.stringify({ ts: 'b' })}\n`);
+  const status = JSON.parse(runCli(['status', '--json'], { cwd: root }).stdout);
+  assert.equal(status.latency.count, 6);
+  assert.equal(status.errors.count, 2);
+});
+
+test('status counts events across read chunks in a large file, and only lines that parse', (t) => {
+  const { root } = repo(t);
+  init(root);
+  const file = path.join(storeOf(root), 'raw', 'claude-code', 'big-m.jsonl');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const line = JSON.stringify({ origin: 'hook', timestamp: '2026-11-07T10:00:00+01:00', pad: 'x'.repeat(900) });
+  const body = Array.from({ length: 3000 }, () => line).join('\n');
+  fs.writeFileSync(file, `${body}\nnot json\n${line}\n{"partial`);
+  const status = JSON.parse(runCli(['status', '--json'], { cwd: root }).stdout);
+  assert.equal(status.tools['claude-code'].events, 3001);
+});
+
+test('status warns when transcripts are newer than the last captured event', (t) => {
+  const { root, base } = repo(t);
+  init(root);
+  const home = path.join(base, 'home');
+  const projects = path.join(home, '.claude', 'projects', root.replace(/[^A-Za-z0-9]/g, '-'));
+  fs.mkdirSync(projects, { recursive: true });
+  fs.writeFileSync(path.join(projects, 'some-session.jsonl'), '{}\n');
+  const status = JSON.parse(runCli(['status', '--json'], { cwd: root, env: { HOME: home, USERPROFILE: home, CLAUDE_CONFIG_DIR: '' } }).stdout);
+  assert.match(String(status.capture_hint), /after the last captured event/);
+  const quiet = JSON.parse(runCli(['status', '--json'], { cwd: root, env: { HOME: path.join(base, 'empty-home'), USERPROFILE: path.join(base, 'empty-home'), CLAUDE_CONFIG_DIR: '' } }).stdout);
+  assert.equal(quiet.capture_hint, null);
 });

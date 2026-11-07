@@ -121,4 +121,26 @@ function pathsTouched(payload) {
     .map((value) => require('node:path').resolve(base, value));
 }
 
-module.exports = { normalize, projectDir, pathsTouched };
+/**
+ * When Claude Code last wrote a transcript for this folder. Only file times are read,
+ * never content.
+ *
+ * @returns {string | null}
+ */
+function latestSessionAt(folder, env = process.env) {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const base = env.CLAUDE_CONFIG_DIR || path.join(require('node:os').homedir(), '.claude');
+  const dir = path.join(base, 'projects', folder.replace(/[^A-Za-z0-9]/g, '-'));
+  let latest = 0;
+  try {
+    for (const name of fs.readdirSync(dir)) {
+      if (name.endsWith('.jsonl')) latest = Math.max(latest, fs.statSync(path.join(dir, name)).mtimeMs);
+    }
+  } catch {
+    return null;
+  }
+  return latest ? new Date(latest).toISOString() : null;
+}
+
+module.exports = { normalize, projectDir, pathsTouched, latestSessionAt };
