@@ -44,11 +44,16 @@ function isCapturing(state) {
   return Boolean(state && state.activated === true && state.paused !== true);
 }
 
-/** @returns {string} Short stable identifier that does not expose the host name. */
+/**
+ * A new random identifier for one activation, stored in local.json and stable from
+ * then on. It is random rather than derived from the host name: two clones on one
+ * host, or two people whose computers share a common name, must never own the same
+ * file names (PRD STO-6), and nothing about the host is revealed.
+ *
+ * @returns {string} 8 hex characters.
+ */
 function machineId() {
-  const crypto = require('node:crypto');
-  const os = require('node:os');
-  return crypto.createHash('sha256').update(os.hostname()).digest('hex').slice(0, 8);
+  return require('node:crypto').randomBytes(4).toString('hex');
 }
 
 module.exports = { storeDir, readLocal, writeLocal, isCapturing, machineId };

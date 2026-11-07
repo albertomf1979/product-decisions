@@ -52,7 +52,7 @@ test('isCapturing is true only when activated and not paused', () => {
   assert.equal(isCapturing(null), false);
 });
 
-test('machineId is stable and 8 hex characters', () => {
+test('machineId is 8 hex characters, new for each activation', () => {
   assert.match(machineId(), /^[0-9a-f]{8}$/);
-  assert.equal(machineId(), machineId());
+  assert.notEqual(machineId(), machineId());
 });

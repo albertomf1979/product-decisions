@@ -412,3 +412,15 @@ test('sync explains why nothing was pushed when consent is out of date', (t) => 
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /consent text has changed/);
 });
+
+// Found by the M2 gate demo.
+test('two clones on one host get different machine ids, so neither overwrites the other on the remote', async (t) => {
+  const { root, remote, join } = team(t);
+  const second = join('second');
+  assert.notEqual(machine(root), machine(second));
+  await publish({ commonDir: common(root), visibilityOf: vis('private') });
+  await publish({ commonDir: common(second), visibilityOf: vis('private') });
+  await publish({ commonDir: common(root), visibilityOf: vis('private') });
+  const cliFiles = [...readTreeFiles(remote, readRef(remote, RAW_REF)).keys()].filter((f) => f.startsWith('cli/'));
+  assert.equal(cliFiles.length, 2, cliFiles.join());
+});
