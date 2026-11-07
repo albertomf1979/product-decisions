@@ -35,11 +35,14 @@ function team(t) {
   git(base, 'init', '-q', '--bare', remote);
   git(root, 'remote', 'add', 'origin', remote);
   git(root, 'push', '-q', 'origin', 'main');
+  // Clones check out main whatever the host's default branch is.
+  git(remote, 'symbolic-ref', 'HEAD', 'refs/heads/main');
   assert.equal(runCli(['init', '--yes', '--track', 'PRD.md'], { cwd: root }).status, 0);
   const join = (name) => {
     const dir = path.join(base, name);
     git(base, 'clone', '-q', remote, dir);
     git(dir, 'config', 'user.name', name);
+    git(dir, 'config', 'user.email', `${name}@example.com`);
     git(dir, 'config', 'commit.gpgsign', 'false');
     git(dir, 'config', 'maintenance.auto', 'false');
     assert.equal(runCli(['init', '--yes'], { cwd: dir }).status, 0);
@@ -118,6 +121,7 @@ test('C2: joining a project whose folder name is taken locally is refused', asyn
   const dir = path.join(base, 'joiner');
   git(base, 'clone', '-q', remote, dir);
   git(dir, 'config', 'user.name', 'joiner');
+  git(dir, 'config', 'user.email', 'joiner@example.com');
   fs.mkdirSync(path.join(dir, 'product-decisions'));
   fs.writeFileSync(path.join(dir, 'product-decisions', 'README.md'), 'mine\n');
   const result = runCli(['init', '--yes'], { cwd: dir });
@@ -207,6 +211,7 @@ test('I2: a submodule publishes to its own refs, never to the superproject', asy
   const before = readRef(superproject.root, DOCS_REF);
   const inner = path.join(superproject.root, 'sub');
   git(inner, 'config', 'user.name', 'Inner');
+  git(inner, 'config', 'user.email', 'inner@example.com');
   assert.equal(runCli(['init', '--yes', '--folder', 'sub-decisions'], { cwd: inner }).status, 0);
   addEvents(inner, 's-sub', [ev('s-sub', 'user_prompt', { prompt: 'x' })]);
   await publish({ commonDir: common(inner), visibilityOf: vis('private'), push: false });
