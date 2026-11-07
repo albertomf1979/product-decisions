@@ -43,3 +43,12 @@ test('not activated: p95 is within budget', (t) => {
   t.diagnostic(`inactive: p50 ${p50.toFixed(1)} ms, p95 ${p95.toFixed(1)} ms`);
   assert(p95 <= 50 * factor, `p95 ${p95.toFixed(1)} ms`);
 });
+
+test('Stop, which also starts the worker: p95 is within budget', (t) => {
+  const { root, cleanup } = makeRepo();
+  t.after(cleanup);
+  activate(root);
+  const { p50, p95 } = measure(root, 'Stop.json');
+  t.diagnostic(`stop with worker: p50 ${p50.toFixed(1)} ms, p95 ${p95.toFixed(1)} ms`);
+  assert(p95 <= 100 * factor, `p95 ${p95.toFixed(1)} ms`);
+});

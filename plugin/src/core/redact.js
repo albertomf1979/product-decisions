@@ -9,8 +9,6 @@ const BASE64_MIN_RUN = 4096;
 const sha256 = (data) => crypto.createHash('sha256').update(data).digest('hex');
 const mark = (type) => `[REDACTED:${type}]`;
 
-const URL_SCHEME = '[a-z][a-z0-9+.-]{0,31}:\\/\\/';
-
 // Order matters: specific token shapes first, then the broader assignment rules.
 // This runs synchronously in a hook, where no watchdog can interrupt it, so every
 // repeated part that can fail after a long scan has an upper bound. Tests in
@@ -32,8 +30,6 @@ const RULES = [
   [/\b(authorization\s{0,8}[:=]\s{0,8})(?:(?:bearer|basic|token)\s{1,8})?[^\s"',;]+/gi, `$1${mark('auth_header')}`],
   [/\bbearer\s{1,8}[A-Za-z0-9._~+/-]{16,}=*/gi, mark('bearer')],
   [/(?<![\w-])((?:x-[a-z0-9-]{0,32}(?:key|token|secret|auth)[a-z0-9-]{0,16}|set-cookie|cookie|proxy-authorization)\s{0,8}:\s{0,8})[^\n"']+/gi, `$1${mark('auth_header')}`],
-  [new RegExp(`\\b(${URL_SCHEME})[^\\s/?#]{1,512}@`, 'gi'), `$1${mark('url_credentials')}@`],
-  [new RegExp(`\\b(${URL_SCHEME})[^\\s:@/]{1,256}:[^\\s@]{1,256}@`, 'gi'), `$1${mark('url_credentials')}@`],
   [/([?&][a-z0-9_-]{0,32}(?:key|token|secret|password|passwd|signature)[a-z0-9_-]{0,16}=)[^&\s"'#]+/gi, `$1${mark('url_param')}`],
   [/(?<![\w-])((?:-u|--user)[\s=]{1,8})[^\s:]{1,256}:\S+/g, `$1${mark('basic_auth')}`],
   [/(?<![\w-])(--?[a-z0-9-]{0,32}(?:password|passwd|token|secret|api-?key)\s{1,8})(?!-)\S+/gi, `$1${mark('cli_flag')}`],
@@ -48,6 +44,57 @@ const RULES = [
     `$1${mark('assignment')}`,
   ],
 ];
+
+// A rule runs only when the text contains one of its hints, which keeps ordinary text
+// fast. Hints are compared with the lower-cased text.
+const HINTS = new Map([
+  [0, ['private key']], [1, ['sk-ant-']], [2, ['sk-']], [3, ['ghp_', 'gho_', 'ghu_', 'ghs_', 'ghr_']],
+  [4, ['github_pat_']], [5, ['akia', 'asia']], [6, ['aiza']], [7, ['xox']], [8, ['_live_']], [9, ['npm_']],
+  [10, ['eyj']], [11, ['authorization']], [12, ['bearer']], [13, ['cookie', 'x-', 'proxy-authorization']],
+  [14, ['=']], [15, ['-u', '--user']], [16, ['pass', 'token', 'secret', 'api']],
+  [17, ['secret', 'token', 'pass', 'key', 'credential', 'webhook']],
+  [18, ['pass', 'secret', 'token', 'key', 'credential', 'webhook']],
+]);
+
+const isSchemeChar = (c) => (c >= 97 && c <= 122) || (c >= 65 && c <= 90) || (c >= 48 && c <= 57) || c === 43 || c === 46 || c === 45;
+const isLetter = (c) => (c >= 97 && c <= 122) || (c >= 65 && c <= 90);
+const isSpace = (c) => c === 32 || (c >= 9 && c <= 13);
+
+/**
+ * Hides credentials in URLs such as scheme://user:pass@host or scheme://token@host,
+ * including passwords that contain '/' or '@'. A linear scan: each URL is read only up
+ * to the next '://', so text full of short schemes stays fast.
+ */
+function replaceUrlCredentials(text) {
+  let out = '';
+  let copied = 0;
+  let at = text.indexOf('://');
+  while (at >= 0) {
+    const next = text.indexOf('://', at + 3);
+    const limit = next < 0 ? text.length : next;
+    let start = at;
+    while (start > 0 && at - start < 32 && isSchemeChar(text.charCodeAt(start - 1))) start -= 1;
+    const from = at + 3;
+    if (start < at && isLetter(text.charCodeAt(start)) && from >= copied) {
+      // User info ends at the last '@' before the path, query, or fragment.
+      let lastAt = -1;
+      let colon = -1;
+      for (let i = from; i < limit && i - from < 512; i += 1) {
+        const c = text.charCodeAt(i);
+        if (isSpace(c)) break;
+        if (c === 64) lastAt = i;
+        else if (c === 58 && colon < 0) colon = i;
+        else if ((c === 47 || c === 63 || c === 35) && colon < 0) break;
+      }
+      if (lastAt > from) {
+        out += text.slice(copied, from) + mark('url_credentials');
+        copied = lastAt;
+      }
+    }
+    at = next;
+  }
+  return copied === 0 ? text : out + text.slice(copied);
+}
 
 const SECRET_KEY = /(?:pass(?:word|wd)?|secret|token|api[_-]?key|authorization|credentials?|cookie|(?:private|access|secret|signing|encryption|client)[_-]?key)$/i;
 
@@ -119,7 +166,13 @@ function maskHome(text, home) {
  */
 function redactString(text, extra = [], home = null) {
   let out = replaceBinaryRuns(maskHome(text, home));
-  for (const [pattern, replacement] of RULES) out = out.replace(pattern, replacement);
+  const lower = out.toLowerCase();
+  RULES.forEach(([pattern, replacement], index) => {
+    const hints = HINTS.get(index);
+    if (hints && !hints.some((hint) => lower.includes(hint))) return;
+    out = out.replace(pattern, replacement);
+  });
+  if (lower.includes('://')) out = replaceUrlCredentials(out);
   for (const pattern of extra) out = out.replace(pattern, mark('custom'));
   return out;
 }

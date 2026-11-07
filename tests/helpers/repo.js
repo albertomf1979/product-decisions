@@ -8,6 +8,18 @@ const { execFileSync } = require('node:child_process');
 const git = (cwd, ...args) =>
   execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
 
+const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
+/**
+ * Hooks start a detached worker, which may still be writing when a test ends. Waits for
+ * its lock to go away before deleting, so cleanup does not race it.
+ */
+function removeWhenIdle(base, root) {
+  const lock = path.join(root, '.git', 'product-decisions', 'state', 'worker.lock');
+  for (let waited = 0; waited < 5000 && fs.existsSync(lock); waited += 50) sleep(50);
+  fs.rmSync(base, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+}
+
 /** Creates a temporary Git repository. Paths are resolved, so macOS /var symlinks do not break comparisons. */
 function makeRepo({ commit = true, dirName = 'repo' } = {}) {
   // The native form also expands Windows short names such as RUNNER~1.
@@ -23,7 +35,7 @@ function makeRepo({ commit = true, dirName = 'repo' } = {}) {
     git(root, 'add', '.');
     git(root, 'commit', '-q', '-m', 'init');
   }
-  return { root, base, cleanup: () => fs.rmSync(base, { recursive: true, force: true }) };
+  return { root, base, cleanup: () => removeWhenIdle(base, root) };
 }
 
 /** Adds a linked worktree next to the repository and returns its path. */

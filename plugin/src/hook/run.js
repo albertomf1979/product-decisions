@@ -70,6 +70,25 @@ function capture({ payload, raw, location, state, tool, adapter, cwd }) {
   });
 
   appendLine(rawFilePath(location.commonDir, tool, normalized.sessionId, state.machine), JSON.stringify(event));
+
+  // The worker does the heavy work. Failing to start it must never lose the event above.
+  const { triggerFor } = require('../worker/trigger.js');
+  const kind = triggerFor(normalized.eventType);
+  if (kind) {
+    try {
+      const { enqueue } = require('../worker/queue.js');
+      enqueue(location.commonDir, kind === 'recover' ? { kind } : {
+        kind,
+        tool,
+        sessionId: normalized.sessionId,
+        cwd: payload.cwd || cwd,
+        transcriptPath: payload.transcript_path || null,
+      });
+      require('../worker/trigger.js').startWorker(location.commonDir);
+    } catch (err) {
+      require('../core/diagnostics.js').logError(location.commonDir, 'trigger', err);
+    }
+  }
   // Measured from process start, so it includes Node's own startup.
   logLatency(location.commonDir, { tool, event: normalized.hookEvent, ms: performance.now(), bytes: raw.length });
 }
