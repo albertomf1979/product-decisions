@@ -36,6 +36,8 @@ function contentHash(event) {
 function buildActor(normalized, ctx) {
   if (normalized.actorType === 'user') return { type: 'user', name: ctx.actorName };
   if (normalized.actorType === 'subagent') return { type: 'subagent', name: normalized.agent.name };
+  // Seals and other events the plugin derives itself.
+  if (normalized.actorType === 'plugin') return { type: 'plugin', name: 'product-decisions' };
   return { type: 'llm', name: normalized.llmName };
 }
 

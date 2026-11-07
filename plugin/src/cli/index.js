@@ -9,13 +9,15 @@ Commands:
   init [--yes]     Activate capture for you in this repository
   status [--json]  Show what is active and what has been captured
   pause            Stop capture for you on this clone
-  resume           Restart capture and record the gap`;
+  resume           Restart capture and record the gap
+  verify [--json]  Check that the record has not been altered`;
 
 const COMMANDS = {
   init: () => require('./init.js').init,
   status: () => require('./status.js').status,
   pause: () => require('./pause.js').pause,
   resume: () => require('./pause.js').resume,
+  verify: () => require('./verify.js').verify,
 };
 
 async function main(argv) {
