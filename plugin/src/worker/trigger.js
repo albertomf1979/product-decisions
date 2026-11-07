@@ -16,6 +16,8 @@ function triggerFor(eventType) {
 function startWorker(commonDir) {
   const { spawn } = require('node:child_process');
   const child = spawn(process.execPath, [path.join(__dirname, 'main.js'), commonDir], {
+    // Not the repository: on Windows a process's folder cannot be removed or renamed.
+    cwd: require('node:os').tmpdir(),
     detached: true,
     stdio: 'ignore',
     windowsHide: true,

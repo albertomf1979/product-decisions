@@ -71,3 +71,8 @@ test('a paused repository starts no worker', (t) => {
   assertSilent(runHook({ stdin: JSON.stringify(fixture('Stop.json', { cwd: root })), cwd: root }));
   assert.equal(fs.existsSync(pendingDir(root)), false);
 });
+
+test('the worker does not run inside the repository folder', (t) => {
+  const source = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'plugin', 'src', 'worker', 'trigger.js'), 'utf8');
+  assert.match(source, /cwd: require\('node:os'\)\.tmpdir\(\)/);
+});

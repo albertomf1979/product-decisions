@@ -30,6 +30,9 @@ function makeRepo({ commit = true, dirName = 'repo' } = {}) {
   git(root, 'config', 'user.name', 'Test Person');
   git(root, 'config', 'user.email', 'test@example.com');
   git(root, 'config', 'commit.gpgsign', 'false');
+  // Git's own background housekeeping would otherwise write files while a test watches.
+  git(root, 'config', 'maintenance.auto', 'false');
+  git(root, 'config', 'gc.auto', '0');
   if (commit) {
     fs.writeFileSync(path.join(root, 'PRD.md'), '# PRD\n');
     git(root, 'add', '.');
