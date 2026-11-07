@@ -49,6 +49,7 @@ function extractSources(normalized, git) {
   if (mcp) add({ type: 'mcp', server: mcp.server, tool: mcp.tool });
   if (typeof input.url === 'string') add(classify(input.url));
 
+  scan(input.command);
   scan(payload.prompt);
   scan(payload.last_assistant_message);
   if (mcp || WEB_TOOLS.has(toolName)) scan(payload.tool_response);

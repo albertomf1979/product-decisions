@@ -95,28 +95,45 @@ function replaceBinaryRuns(text) {
   return parts.join('');
 }
 
+const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const homePatterns = new Map();
+
+/**
+ * Replaces the home folder with `~`, so the person's account name stays out of the
+ * record. Only at a path boundary: /Users/ana must not touch /Users/anabel.
+ */
+function maskHome(text, home) {
+  if (!home || home.length < 2) return text;
+  if (!homePatterns.has(home)) {
+    const forms = [...new Set([home, home.replace(/\\/g, '/')])].map(escapeRegExp);
+    homePatterns.set(home, new RegExp(`(?:${forms.join('|')})(?=$|[\\\\/\\s"'<>:;,)\\]}])`, 'g'));
+  }
+  return text.replace(homePatterns.get(home), '~');
+}
+
 /**
  * @param {string} text
  * @param {RegExp[]} [extra] Patterns from `compileExtra`.
+ * @param {string | null} [home] Home folder to mask, if any.
  * @returns {string}
  */
-function redactString(text, extra = []) {
-  let out = replaceBinaryRuns(text);
+function redactString(text, extra = [], home = null) {
+  let out = replaceBinaryRuns(maskHome(text, home));
   for (const [pattern, replacement] of RULES) out = out.replace(pattern, replacement);
   for (const pattern of extra) out = out.replace(pattern, mark('custom'));
   return out;
 }
 
 /** Deep copy with every string redacted, keys included. The input is not mutated. */
-function redactValue(value, extra = []) {
-  if (typeof value === 'string') return redactString(value, extra);
-  if (Array.isArray(value)) return value.map((item) => redactValue(item, extra));
+function redactValue(value, extra = [], home = null) {
+  if (typeof value === 'string') return redactString(value, extra, home);
+  if (Array.isArray(value)) return value.map((item) => redactValue(item, extra, home));
   if (value === null || typeof value !== 'object') return value;
   // Object.fromEntries defines own properties, so a "__proto__" key stays inert.
   return Object.fromEntries(Object.entries(value).map(([key, item]) => {
-    const safeKey = redactString(key, extra);
+    const safeKey = redactString(key, extra, home);
     if (SECRET_KEY.test(key) && item !== null && item !== '' && typeof item !== 'boolean') return [safeKey, mark('key')];
-    return [safeKey, redactValue(item, extra)];
+    return [safeKey, redactValue(item, extra, home)];
   }));
 }
 
@@ -131,10 +148,12 @@ function commandTouchesSecretFile(command) {
   return String(command).split(/[\s"'`;|&<>(){},=]+/).filter(Boolean).some(isSecretPath);
 }
 
-const hashedContent = (value) => ({
-  redacted_file: true,
-  sha256: sha256(typeof value === 'string' ? value : JSON.stringify(value)),
-});
+/** With a salt, an HMAC: a published hash then cannot be used to guess a short value. */
+const hashedContent = (value, salt) => {
+  const data = typeof value === 'string' ? value : JSON.stringify(value);
+  const digest = salt ? crypto.createHmac('sha256', salt).update(data).digest('hex') : sha256(data);
+  return { redacted_file: true, sha256: digest };
+};
 
 function namesSecretFile(input) {
   return Object.entries(input).some(([key, value]) => {
@@ -153,17 +172,17 @@ function namesSecretFile(input) {
  * @param {object} payload The payload of a tool event.
  * @returns {object} A copy when a secret file is involved, or the same payload.
  */
-function protectSecretFiles(payload) {
+function protectSecretFiles(payload, salt) {
   const input = payload.tool_input;
   if (!input || typeof input !== 'object' || !namesSecretFile(input)) return payload;
 
   const isCarrier = (value) => typeof value === 'string' || (value !== null && typeof value === 'object');
   const safeInput = Object.fromEntries(Object.entries(input).map(([key, value]) => (
-    [key, PATH_FIELD.test(key) || !isCarrier(value) ? value : hashedContent(value)]
+    [key, PATH_FIELD.test(key) || !isCarrier(value) ? value : hashedContent(value, salt)]
   )));
   const safe = { ...payload, tool_input: safeInput };
   for (const field of ['tool_response', 'error']) {
-    if (safe[field] !== undefined) safe[field] = hashedContent(safe[field]);
+    if (safe[field] !== undefined) safe[field] = hashedContent(safe[field], salt);
   }
   return safe;
 }
@@ -191,6 +210,7 @@ function oversizedPayload(rawBytes) {
 module.exports = {
   BASE64_MIN_RUN,
   MAX_PAYLOAD_BYTES,
+  maskHome,
   redactString,
   redactValue,
   isSecretPath,

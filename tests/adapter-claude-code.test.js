@@ -122,3 +122,23 @@ test('unknown hook events and non-objects return null', () => {
   assert.equal(normalize([]), null);
   assert.equal(normalize('text'), null);
 });
+
+test('a subagent event with no agent_id is labelled as unknown, not main', () => {
+  const out = normalize({ hook_event_name: 'SubagentStop', session_id: 's' });
+  assert.equal(out.actorType, 'subagent');
+  assert.deepEqual(out.agent, { name: 'unknown' });
+});
+
+test('a hook event named after an Object method is ignored', () => {
+  for (const name of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) {
+    assert.equal(normalize({ hook_event_name: name }), null, name);
+  }
+});
+
+test('pathsTouched gives absolute paths from the tool input', () => {
+  const { pathsTouched } = require('../plugin/src/adapters/claude-code.js');
+  const path = require('node:path');
+  assert.deepEqual(pathsTouched({ cwd: '/p', tool_input: { file_path: 'a/b.js' } }), [path.resolve('/p', 'a/b.js')]);
+  assert.deepEqual(pathsTouched({ cwd: '/p', tool_input: { notebook_path: '/x/n.ipynb', path: 'src' } }), [path.resolve('/x/n.ipynb'), path.resolve('/p', 'src')]);
+  assert.deepEqual(pathsTouched({ cwd: '/p', prompt: 'hi' }), []);
+});

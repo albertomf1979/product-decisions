@@ -363,3 +363,53 @@ test('capture leaves Git state alone in a repository with a dirty tree', (t) => 
   send(root, 'Stop.json');
   assert.equal(git(root, 'status', '--porcelain'), before);
 });
+
+function sendAs(root, { project, cwd, name, overrides = {}, env = {} }) {
+  const payload = fixture(name, { cwd, ...overrides });
+  assertSilent(runHook({
+    stdin: JSON.stringify(payload),
+    cwd,
+    event: payload.hook_event_name,
+    env: { CLAUDE_PROJECT_DIR: project, ...env },
+  }));
+}
+
+test('a session opened above a repository sends tool events to the repository of the file', (t) => {
+  const { root, base } = activeRepo(t);
+  const edit = fixture('PostToolUse-Edit.json');
+  sendAs(root, { project: base, cwd: base, name: 'PostToolUse-Edit.json', overrides: { tool_input: { ...edit.tool_input, file_path: path.join(root, 'a.js') } } });
+  const events = capturedEvents(root);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].event_type, 'tool_call');
+});
+
+test('that session records no prompt or response', (t) => {
+  const { root, base } = activeRepo(t);
+  sendAs(root, { project: base, cwd: base, name: 'UserPromptSubmit.json' });
+  sendAs(root, { project: base, cwd: base, name: 'Stop.json' });
+  assert.equal(capturedEvents(root).length, 0);
+});
+
+test('a file in a repository that is not activated captures nothing', (t) => {
+  const { root, base, cleanup } = makeRepo();
+  t.after(cleanup);
+  const edit = fixture('PostToolUse-Edit.json');
+  sendAs(root, { project: base, cwd: base, name: 'PostToolUse-Edit.json', overrides: { tool_input: { ...edit.tool_input, file_path: path.join(root, 'a.js') } } });
+  assert.equal(fs.existsSync(storeOf(root)), false);
+});
+
+test('the home folder is masked everywhere in an event', (t) => {
+  const { root, base } = activeRepo(t);
+  const env = { HOME: base, USERPROFILE: base };
+  sendAs(root, { project: root, cwd: root, name: 'SessionStart-startup.json', env, overrides: { transcript_path: path.join(base, '.claude', 't.jsonl') } });
+  sendAs(root, { project: root, cwd: root, name: 'UserPromptSubmit.json', env, overrides: { prompt: `look at ${path.join(base, 'notes', 'x.md')}` } });
+  sendAs(root, { project: root, cwd: root, name: 'PostToolUse-Read.json', env, overrides: { tool_input: { file_path: path.join(root, 'PRD.md') }, tool_response: `from ${base}` } });
+  const events = capturedEvents(root);
+  const byType = (type) => events.find((event) => event.event_type === type);
+  assert.equal(events.length, 3);
+  assert(!storeText(root).includes(base), 'the real home path must not appear');
+  assert.equal(byType('session_start').sources[0].path, `~${path.sep}.claude${path.sep}t.jsonl`);
+  assert(byType('user_prompt').payload.prompt.startsWith('look at ~'));
+  assert.deepEqual(byType('tool_call').sources[0], { type: 'file', path: 'PRD.md', commit: byType('tool_call').git.head });
+  assert.equal(byType('tool_call').summary, 'Read PRD.md');
+});

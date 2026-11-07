@@ -14,14 +14,15 @@ function loadAdapter(tool) {
 /** Replaces the payload with what may be stored: secret files hashed, secrets redacted. */
 function sanitize(normalized, raw, state) {
   const { redactValue, protectSecretFiles, compileExtra, oversizedPayload } = require('../core/redact.js');
+  const home = require('node:os').homedir();
   return oversizedPayload(raw)
-    || redactValue(protectSecretFiles(normalized.payload), compileExtra(state.redact_patterns));
+    || redactValue(protectSecretFiles(normalized.payload, state.salt), compileExtra(state.redact_patterns), home);
 }
 
 /** A subagent's model is unknown here: assuming the main agent's would be a guess. */
 function resolveModel(normalized, commonDir, tool) {
   const { readSessionMeta, writeSessionMeta } = require('../core/store.js');
-  if (normalized.agent.id) return { model: null, modelSource: null };
+  if (normalized.agent.id) return { model: null, modelSource: null, toolVersion: null };
   if (normalized.modelHint) {
     const { model, source } = normalized.modelHint;
     try {
@@ -29,10 +30,11 @@ function resolveModel(normalized, commonDir, tool) {
     } catch (err) {
       require('../core/diagnostics.js').logError(commonDir, 'session-meta', err);
     }
-    return { model, modelSource: source };
+    return { model, modelSource: source, toolVersion: null };
   }
   const meta = readSessionMeta(commonDir, tool, normalized.sessionId);
-  return meta ? { model: meta.model, modelSource: meta.model_source } : { model: null, modelSource: null };
+  if (!meta) return { model: null, modelSource: null, toolVersion: null };
+  return { model: meta.model ?? null, modelSource: meta.model_source ?? null, toolVersion: meta.tool_version ?? null };
 }
 
 /** The active path. These modules load only here, so inactive projects stay fast. */
@@ -48,10 +50,16 @@ function capture({ payload, raw, location, state, tool, adapter, cwd }) {
   const { logLatency } = require('../core/diagnostics.js');
 
   normalized.payload = sanitize(normalized, raw, state);
-  const { model, modelSource } = resolveModel(normalized, location.commonDir, tool);
+  // Masked like the payload, so paths inside it still read as relative to the session.
+  const { maskHome } = require('../core/redact.js');
+  const home = require('node:os').homedir();
+  if (normalized.cwd) normalized.cwd = maskHome(normalized.cwd, home);
+  if (normalized.transcriptPath) normalized.transcriptPath = maskHome(normalized.transcriptPath, home);
+  const { model, modelSource, toolVersion } = resolveModel(normalized, location.commonDir, tool);
   const git = readGit(location, payload.cwd || cwd);
   const event = buildEvent(normalized, {
     tool,
+    toolVersion,
     sessionId: normalized.sessionId,
     actorName: state.actor_name,
     model,
@@ -92,16 +100,28 @@ function readEnvelope(raw, hookEvent) {
   return envelope;
 }
 
+const activatedAt = (folder) => {
+  const location = folder ? locateRepo(folder) : null;
+  const state = location ? readLocal(location.commonDir) : null;
+  return { location, state: state && state.activated ? state : null };
+};
+
 /**
- * Decides which repository an event belongs to. The first activated repository wins,
- * paused or not: the one the session was opened in governs even after the session
- * changes directory, and the current folder serves sessions opened above a repository.
+ * Decides which repository an event belongs to (PRD CAP-14):
+ * 1. the repository the session was opened in, if activated, paused or not, so it
+ *    governs even after the session changes directory;
+ * 2. otherwise the repository of the current folder, activated or not;
+ * 3. only when the current folder is in no repository, the activated repository of a
+ *    file the event touches. Checked last, because looking up paths costs time.
  */
-function resolveRepo(folders) {
-  for (const folder of folders) {
-    const location = folder ? locateRepo(folder) : null;
-    const state = location ? readLocal(location.commonDir) : null;
-    if (state && state.activated) return { location, state };
+function resolveRepo(adapter, payload, env, cwd) {
+  const project = activatedAt(adapter.projectDir(env));
+  if (project.state) return project;
+  const current = activatedAt(payload.cwd || cwd);
+  if (current.location) return current.state ? current : null;
+  for (const file of adapter.pathsTouched(payload)) {
+    const touched = activatedAt(file);
+    if (touched.state) return touched;
   }
   return null;
 }
@@ -117,7 +137,7 @@ function handlePayload({ raw, tool, hookEvent, cwd, env = process.env }) {
     const adapter = loadAdapter(tool);
     if (!adapter) return;
     const payload = raw.length > MAX_PAYLOAD_BYTES ? readEnvelope(raw, hookEvent) : JSON.parse(raw.toString('utf8'));
-    const resolved = resolveRepo([adapter.projectDir(env), payload.cwd || cwd]);
+    const resolved = resolveRepo(adapter, payload, env, cwd);
     if (!resolved) return;
     location = resolved.location;
     if (!isCapturing(resolved.state)) return;

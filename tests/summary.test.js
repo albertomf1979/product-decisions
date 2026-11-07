@@ -70,3 +70,16 @@ test('an oversized payload still gets a line', () => {
 test('an unknown event type falls back to its name', () => {
   assert.equal(summarize({ eventType: 'gap', agent: { name: 'main' }, payload: {} }), 'gap');
 });
+
+test('failure summaries stay on one line', () => {
+  assert.equal(summarize({ eventType: 'turn_failure', agent: { name: 'main' }, payload: { error: 'a\nb' } }), 'Turn failed: a b');
+});
+
+test('the summary of a prompt skips system reminders', () => {
+  const prompt = '<system-reminder>\nLinked sessions\n</system-reminder>\nHola, <system-reminder>x</system-reminder>sigue';
+  assert.equal(summarize({ eventType: 'user_prompt', agent: { name: 'main' }, payload: { prompt } }), 'Hola, sigue');
+});
+
+test('an unclosed system reminder does not hide the rest', () => {
+  assert.equal(summarize({ eventType: 'user_prompt', agent: { name: 'main' }, payload: { prompt: 'Hola <system-reminder> y adiós' } }), 'Hola <system-reminder> y adiós');
+});

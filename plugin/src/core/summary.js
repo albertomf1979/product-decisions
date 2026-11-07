@@ -1,9 +1,7 @@
 'use strict';
 
 const { relativeTo } = require('./paths.js');
-
-const MAX = 80;
-const oneLine = (text) => String(text).replace(/\s+/g, ' ').trim().slice(0, MAX);
+const { oneLine, stripReminders } = require('./text.js');
 
 /** The most telling field of a tool's input, whatever the tool is. */
 function toolTarget(input, cwd) {
@@ -28,9 +26,9 @@ function summarize(normalized) {
     case 'tool_call': return toolLine(normalized);
     case 'tool_failure': return `Failed: ${toolLine(normalized)}`;
     case 'tool_denied': return `Denied: ${toolLine(normalized)}`;
-    case 'user_prompt': return oneLine(payload.prompt ?? '');
+    case 'user_prompt': return oneLine(stripReminders(payload.prompt ?? ''));
     case 'agent_response': return oneLine(payload.last_assistant_message ?? '') || 'Turn ended';
-    case 'turn_failure': return `Turn failed: ${payload.error}`;
+    case 'turn_failure': return oneLine(`Turn failed: ${payload.error}`);
     case 'session_start': return `Session started (${payload.source})`;
     case 'session_end': return `Session ended (${payload.reason})`;
     case 'subagent_start': return `Subagent started: ${agent.name}`;

@@ -13,7 +13,7 @@ const sha = (root) => git(root, 'rev-parse', 'HEAD').slice(0, 12);
 test('a normal repository gives its branch and commit', (t) => {
   const { root, cleanup } = makeRepo();
   t.after(cleanup);
-  assert.deepEqual(readGit(locateRepo(root), root), { branch: 'main', head: sha(root), worktree: '.' });
+  assert.deepEqual(readGit(locateRepo(root), root), { branch: 'main', head: sha(root), worktree: '.', worktree_name: null });
 });
 
 test('worktree is the session folder relative to its root', (t) => {
@@ -28,7 +28,7 @@ test('a linked worktree gives its own branch', (t) => {
   const { root, cleanup } = makeRepo();
   t.after(cleanup);
   const wt = addWorktree(root, 'wt');
-  assert.deepEqual(readGit(locateRepo(wt), wt), { branch: 'wt-wt', head: sha(root), worktree: '.' });
+  assert.deepEqual(readGit(locateRepo(wt), wt), { branch: 'wt-wt', head: sha(root), worktree: '.', worktree_name: 'wt' });
 });
 
 test('packed refs are read', (t) => {
@@ -42,7 +42,7 @@ test('packed refs are read', (t) => {
 test('a repository with no commits gives head null', (t) => {
   const { root, cleanup } = makeRepo({ commit: false });
   t.after(cleanup);
-  assert.deepEqual(readGit(locateRepo(root), root), { branch: 'main', head: null, worktree: '.' });
+  assert.deepEqual(readGit(locateRepo(root), root), { branch: 'main', head: null, worktree: '.', worktree_name: null });
 });
 
 test('a detached HEAD gives branch null and the commit as head', (t) => {
@@ -50,7 +50,7 @@ test('a detached HEAD gives branch null and the commit as head', (t) => {
   t.after(cleanup);
   const expected = sha(root);
   git(root, 'checkout', '-q', '--detach');
-  assert.deepEqual(readGit(locateRepo(root), root), { branch: null, head: expected, worktree: '.' });
+  assert.deepEqual(readGit(locateRepo(root), root), { branch: null, head: expected, worktree: '.', worktree_name: null });
 });
 
 test('a corrupt HEAD does not throw', (t) => {
@@ -58,5 +58,13 @@ test('a corrupt HEAD does not throw', (t) => {
   t.after(cleanup);
   fs.writeFileSync(path.join(root, '.git', 'HEAD'), 'garbage\n');
   const out = readGit({ worktreeRoot: root, gitDir: path.join(root, '.git'), commonDir: path.join(root, '.git'), mainRoot: root }, root);
-  assert.deepEqual(out, { branch: null, head: null, worktree: '.' });
+  assert.deepEqual(out, { branch: null, head: null, worktree: '.', worktree_name: null });
+});
+
+test('a linked worktree is named, and the main checkout is not', (t) => {
+  const { root, cleanup } = makeRepo();
+  t.after(cleanup);
+  const wt = addWorktree(root, 'feature-x');
+  assert.equal(readGit(locateRepo(root), root).worktree_name, null);
+  assert.equal(readGit(locateRepo(wt), wt).worktree_name, 'feature-x');
 });

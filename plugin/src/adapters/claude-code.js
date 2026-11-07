@@ -23,9 +23,13 @@ const ENVELOPE = new Set([
   'session_id', 'cwd', 'hook_event_name', 'transcript_path', 'agent_id', 'agent_type', 'scratchpad_dir',
 ]);
 
+const SUBAGENT_EVENTS = new Set(['SubagentStart', 'SubagentStop']);
+
 function agentOf(payload) {
   // Only agent_id marks a subagent: agent_type also appears on a configured main agent.
   if (payload.agent_id) return { name: payload.agent_type || 'subagent', id: payload.agent_id };
+  // A subagent event without an id is still a subagent, but which one is unknown (CAP-8).
+  if (SUBAGENT_EVENTS.has(payload.hook_event_name)) return { name: payload.agent_type || 'unknown' };
   return payload.agent_type ? { name: 'main', type: payload.agent_type } : { name: 'main' };
 }
 
@@ -65,7 +69,8 @@ function modelHintOf(payload) {
 function normalize(payload) {
   if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) return null;
   const hookEvent = payload.hook_event_name;
-  const eventType = EVENT_TYPES[hookEvent];
+  // Own keys only: a name such as "constructor" must not reach the prototype.
+  const eventType = Object.prototype.hasOwnProperty.call(EVENT_TYPES, hookEvent) ? EVENT_TYPES[hookEvent] : null;
   if (!eventType) return null;
 
   const rest = Object.fromEntries(Object.entries(payload).filter(([key]) => !ENVELOPE.has(key)));
@@ -75,7 +80,7 @@ function normalize(payload) {
   const normalized = {
     hookEvent,
     eventType,
-    actorType: USER_EVENTS.has(hookEvent) ? 'user' : (agent.id ? 'subagent' : 'llm'),
+    actorType: USER_EVENTS.has(hookEvent) ? 'user' : (agent.id || SUBAGENT_EVENTS.has(hookEvent) ? 'subagent' : 'llm'),
     llmName: 'claude',
     agent,
     sessionId: payload.session_id,
@@ -101,4 +106,19 @@ function projectDir(env) {
   return env.CLAUDE_PROJECT_DIR || null;
 }
 
-module.exports = { normalize, projectDir };
+/**
+ * Absolute paths a tool event names, used to find the repository of a session opened
+ * above one (CAP-14).
+ *
+ * @returns {string[]}
+ */
+function pathsTouched(payload) {
+  const input = payload && payload.tool_input;
+  if (!input || typeof input !== 'object') return [];
+  const base = typeof payload.cwd === 'string' ? payload.cwd : process.cwd();
+  return [input.file_path, input.notebook_path, input.path]
+    .filter((value) => typeof value === 'string' && value !== '')
+    .map((value) => require('node:path').resolve(base, value));
+}
+
+module.exports = { normalize, projectDir, pathsTouched };

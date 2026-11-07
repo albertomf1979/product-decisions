@@ -27,19 +27,22 @@ function resolveRef(commonDir, ref) {
  * Reads the branch and commit from Git's files, with no subprocess, because this
  * runs on the hook path.
  *
- * @returns {{ branch: string | null, head: string | null, worktree: string }}
+ * @returns {{ branch: string | null, head: string | null, worktree: string, worktree_name: string | null }}
  */
 function readGit(location, cwd) {
   const worktree = path.relative(location.worktreeRoot, cwd).split(path.sep).join('/') || '.';
+  // A linked worktree has its own Git directory; the main checkout shares the common one.
+  const worktree_name = location.gitDir === location.commonDir ? null : path.basename(location.worktreeRoot);
   const head = readTrimmed(path.join(location.gitDir, 'HEAD')) || '';
-  if (SHA.test(head)) return { branch: null, head: head.slice(0, SHORT), worktree };
+  if (SHA.test(head)) return { branch: null, head: head.slice(0, SHORT), worktree, worktree_name };
   const match = /^ref:\s*(\S+)$/.exec(head);
-  if (!match) return { branch: null, head: null, worktree };
+  if (!match) return { branch: null, head: null, worktree, worktree_name };
   const sha = resolveRef(location.commonDir, match[1]);
   return {
     branch: match[1].replace(/^refs\/heads\//, ''),
     head: sha ? sha.slice(0, SHORT) : null,
     worktree,
+    worktree_name,
   };
 }
 

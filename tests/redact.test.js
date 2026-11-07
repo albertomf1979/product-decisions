@@ -214,3 +214,27 @@ for (const [name, unit] of Object.entries(cases)) {
     assert(ms < 1000 * factor, `${name} took ${ms.toFixed(0)} ms`);
   });
 }
+
+const { maskHome } = require('../plugin/src/core/redact.js');
+
+test('the secret-file hash depends on the salt', () => {
+  const crypto = require('node:crypto');
+  const input = { tool_input: { file_path: '.env' }, tool_response: 'A=1' };
+  const one = protectSecretFiles(input, 'salt-one').tool_response.sha256;
+  const two = protectSecretFiles(input, 'salt-two').tool_response.sha256;
+  assert.notEqual(one, two);
+  assert.equal(protectSecretFiles(input).tool_response.sha256, crypto.createHash('sha256').update('A=1').digest('hex'));
+});
+
+test('maskHome replaces the home folder only at a path boundary', () => {
+  assert.equal(maskHome('/Users/ana/x and /Users/anabel/y', '/Users/ana'), '~/x and /Users/anabel/y');
+  assert.equal(maskHome('cd /Users/ana', '/Users/ana'), 'cd ~');
+  assert.equal(maskHome('C:\\Users\\ana\\x', 'C:\\Users\\ana'), '~\\x');
+  assert.equal(maskHome('C:/Users/ana/x', 'C:\\Users\\ana'), '~/x');
+  assert.equal(maskHome('nothing here', '/'), 'nothing here');
+});
+
+test('redactValue masks the home folder in keys and values', () => {
+  const out = redactValue({ ['/Users/ana/a']: '/Users/ana/b' }, [], '/Users/ana');
+  assert.deepEqual(out, { '~/a': '~/b' });
+});

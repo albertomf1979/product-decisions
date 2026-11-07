@@ -62,3 +62,8 @@ test('only the first 64 KB of a string is scanned', () => {
   const prompt = `${'x '.repeat(40000)}https://example.com/late`;
   assert.deepEqual(extractSources({ eventType: 'user_prompt', payload: { prompt } }, git), []);
 });
+
+test('URLs in a shell command become sources', () => {
+  assert.deepEqual(extractSources(tool('Bash', { command: 'curl -s https://example.com/x' }), git), [{ type: 'url', url: 'https://example.com/x' }]);
+  assert.deepEqual(extractSources(tool('Bash', { command: 'gh pr view https://github.com/o/r/pull/2' }), git), [{ type: 'pr', url: 'https://github.com/o/r/pull/2' }]);
+});
