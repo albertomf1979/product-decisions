@@ -46,6 +46,12 @@ const chronicle = (events, config = DEFAULT_CONFIG, ctx = context) => {
   return [...files.entries()].find(([p]) => p.startsWith('timeline/'))[1];
 };
 
+test('two sessions whose ids share a prefix get different files', () => {
+  const a = [...renderSession(fullSession('same-prefix-a'), DEFAULT_CONFIG, context).keys()];
+  const b = [...renderSession(fullSession('same-prefix-b'), DEFAULT_CONFIG, context).keys()];
+  assert.equal(a.filter((file) => b.includes(file)).length, 0);
+});
+
 test('rendering the same events twice is byte-identical', () => {
   const events = fullSession();
   assert.deepEqual([...renderSession(events, DEFAULT_CONFIG, context)], [...renderSession(events, DEFAULT_CONFIG, context)]);
@@ -53,8 +59,8 @@ test('rendering the same events twice is byte-identical', () => {
 
 test('it returns the chronicle and its data file, named by date, tool, session, and machine', () => {
   assert.deepEqual([...renderSession(fullSession(), DEFAULT_CONFIG, context).keys()].sort(), [
-    '.data/sessions/2026-11-05-claude-code-s-123456-abcd1234.json',
-    'timeline/2026-11-05-claude-code-s-123456-abcd1234.md',
+    '.data/sessions/2026-11-05-claude-code-s-1234567890-abcd1234.json',
+    'timeline/2026-11-05-claude-code-s-1234567890-abcd1234.md',
   ]);
 });
 

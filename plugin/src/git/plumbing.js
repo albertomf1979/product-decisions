@@ -101,7 +101,8 @@ function refMoved(ref) {
  * @param {string} options.ref
  * @param {string[]} [options.parents]
  * @param {string | null} [options.base] Commit whose files are kept unless `files` replaces them.
- * @param {Object<string, Buffer | null>} options.files Path to content; null removes the path.
+ * @param {Object<string, Buffer | { sha: string } | null>} options.files Path to content, or to an
+ *   existing blob by its sha so large files are never read; null removes the path.
  * @param {string} options.message
  * @param {string} options.authorName
  * @param {string | null} [options.expected] What the ref must point at now; null means it must not exist.
@@ -119,7 +120,7 @@ function commitFiles({ cwd, storeDir, ref, parents = [], base = null, files, mes
         git(['update-index', '--force-remove', '--', file], { cwd, env });
         continue;
       }
-      const blob = text(git(['hash-object', '-w', '--stdin'], { cwd, input: content }));
+      const blob = Buffer.isBuffer(content) ? text(git(['hash-object', '-w', '--stdin'], { cwd, input: content })) : content.sha;
       git(['update-index', '--add', '--cacheinfo', `100644,${blob},${file}`], { cwd, env });
     }
     const tree = text(git(['write-tree'], { cwd, env }));

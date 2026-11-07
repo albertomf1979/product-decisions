@@ -6,7 +6,7 @@ const { UsageError } = require('./shared.js');
 const USAGE = `Usage: product-decisions <command>
 
 Commands:
-  init [--yes] [--language en|es] [--folder <name>] [--track <path>]...
+  init [--yes] [--no-push] [--language en|es] [--folder <name>] [--track <path>]...
                    Activate capture for you, and declare or join the project
   status [--json]  Show what is active and what has been captured
   pause            Stop capture for you on this clone

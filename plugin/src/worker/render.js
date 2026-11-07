@@ -57,9 +57,12 @@ const overlayDir = (commonDir) => path.join(storeDir(commonDir), 'state', 'docs-
 /**
  * @returns {Map<string, Buffer>} The full docs tree as this machine sees it.
  */
-function buildDocsFiles({ location, commonDir, state, config, base }) {
+function buildDocsFiles({ location, commonDir, state, config, bases = [] }) {
   const files = new Map();
-  for (const [file, sha] of readTreeFiles(location.mainRoot, base)) files.set(file, readBlob(location.mainRoot, sha));
+  // Later bases win for the same path; each machine's own files are added on top.
+  for (const base of bases.filter(Boolean)) {
+    for (const [file, sha] of readTreeFiles(location.mainRoot, base)) files.set(file, readBlob(location.mainRoot, sha));
+  }
 
   const gaps = gapsOf(commonDir, state.machine);
   for (const events of ownSessions(commonDir, state.machine)) {
@@ -90,9 +93,9 @@ function refreshFolder({ commonDir }) {
   const base = readRef(location.mainRoot, DOCS_REF);
   if (!base) return null;
   const config = readConfig(commonDir);
-  const files = buildDocsFiles({ location, commonDir, state, config, base });
+  const files = buildDocsFiles({ location, commonDir, state, config, bases: [base] });
   exportFolder({ location, config, files });
   return files;
 }
 
-module.exports = { buildDocsFiles, refreshFolder, ownSessions, overlayDir };
+module.exports = { buildDocsFiles, refreshFolder, ownSessions, overlayDir, walk };

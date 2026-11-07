@@ -168,8 +168,17 @@ async function init({ cwd, flags }) {
     payload: { statement: CONSENT, method },
   });
   writeLocal(location.commonDir, state);
-  report(await declareOrJoin(location, flags, state.actor_name));
+  const result = await declareOrJoin(location, flags, state.actor_name);
+  report(result);
   require('../worker/render.js').refreshFolder({ commonDir: location.commonDir });
+  // Publishing the declaration lets teammates join it instead of declaring their own.
+  if (!result.joined && !flags.noPush) {
+    try {
+      await require('../worker/publish.js').publish({ commonDir: location.commonDir });
+    } catch {
+      // Publication is retried by the worker; activation does not depend on it.
+    }
+  }
   console.log('Activated. Sessions here are captured from now on, including any already open.');
   return 0;
 }

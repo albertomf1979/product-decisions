@@ -163,3 +163,11 @@ test('readRef returns null for a missing ref, and git reports failures with a co
   assert.throws(() => git(['rev-parse', 'no-such-thing'], { cwd: root }), (err) => err.code === 'GIT_FAILED');
   assert.equal(git(['rev-parse', 'no-such-thing'], { cwd: root, allowFail: true }).status !== 0, true);
 });
+
+test('an existing blob can be committed by its sha without reading it', (t) => {
+  const root = repo(t);
+  const first = commitFiles({ cwd: root, storeDir: storeOf(root), ref: DOCS_REF, files: { 'big.jsonl': buf('lots of data') }, message: '1', authorName: 'Ana' });
+  const sha = readTreeFiles(root, first).get('big.jsonl');
+  const second = commitFiles({ cwd: root, storeDir: storeOf(root), ref: RAW_REF, files: { 'copy.jsonl': { sha } }, message: '2', authorName: 'Ana' });
+  assert.equal(contents(root, second)['copy.jsonl'], 'lots of data');
+});

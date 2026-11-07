@@ -13,7 +13,9 @@ const timeOf = (timestamp) => String(timestamp).slice(11, 19);
 
 function baseName(events, machine) {
   const first = events[0];
-  return `${String(first.timestamp).slice(0, 10)}-${first.tool}-${String(first.session_id).slice(0, 8)}-${machine}`;
+  // The whole session id: two sessions on one machine may share any prefix.
+  const session = String(first.session_id).replace(/[^A-Za-z0-9_-]/g, '_');
+  return `${String(first.timestamp).slice(0, 10)}-${first.tool}-${session}-${machine}`;
 }
 
 function aggregateSources(events) {
