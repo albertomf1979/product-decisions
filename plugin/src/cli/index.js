@@ -6,11 +6,13 @@ const { UsageError } = require('./shared.js');
 const USAGE = `Usage: product-decisions <command>
 
 Commands:
-  init [--yes]     Activate capture for you in this repository
+  init [--yes] [--language en|es] [--folder <name>] [--track <path>]...
+                   Activate capture for you, and declare or join the project
   status [--json]  Show what is active and what has been captured
   pause            Stop capture for you on this clone
   resume           Restart capture and record the gap
-  verify [--json]  Check that the record has not been altered`;
+  verify [--json]  Check that the record has not been altered
+  sync [--no-push] Bring the record and the folder up to date`;
 
 const COMMANDS = {
   init: () => require('./init.js').init,
@@ -18,11 +20,22 @@ const COMMANDS = {
   pause: () => require('./pause.js').pause,
   resume: () => require('./pause.js').resume,
   verify: () => require('./verify.js').verify,
+  sync: () => require('./sync.js').sync,
 };
 
 async function main(argv) {
-  const positional = argv.filter((arg) => !arg.startsWith('--'));
-  const flags = { yes: argv.includes('--yes'), json: argv.includes('--json') };
+  const flags = { yes: false, json: false, noPush: false, track: [] };
+  const positional = [];
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === '--yes') flags.yes = true;
+    else if (arg === '--json') flags.json = true;
+    else if (arg === '--no-push') flags.noPush = true;
+    else if (arg === '--language') flags.language = argv[(i += 1)];
+    else if (arg === '--folder') flags.folder = argv[(i += 1)] ?? '';
+    else if (arg === '--track') flags.track.push(argv[(i += 1)]);
+    else if (!arg.startsWith('-')) positional.push(arg);
+  }
 
   if (argv.includes('--help') || argv.includes('-h')) {
     console.log(USAGE);

@@ -49,7 +49,8 @@ test('init shows what is recorded and where it goes', (t) => {
   const { root } = repo(t);
   const { stdout } = init(root);
   assert.match(stdout, /What is recorded/);
-  assert.match(stdout, /Where it goes: only \.git\/product-decisions on this machine/);
+  assert.match(stdout, /Where it goes: first to \.git\/product-decisions on this machine/);
+  assert.match(stdout, /product-decisions\/docs/);
   assert.match(stdout, /product-decisions pause/);
 });
 
@@ -250,19 +251,23 @@ test('status text shows a paused state', (t) => {
   assert.match(runCli(['status'], { cwd: root }).stdout, /paused/i);
 });
 
-test('the CLI writes nothing to the project', (t) => {
+test('the CLI writes only inside its own boundary (PRD P2)', (t) => {
   const { root } = repo(t);
   const hash = (file) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
-  const store = storeOf(root);
-  const snapshot = () => Object.fromEntries(walk(root)
-    .filter((file) => !file.startsWith(store + path.sep))
-    .map((file) => [file, hash(file)]));
-  const before = { files: snapshot(), status: git(root, 'status', '--porcelain') };
-  for (const args of [['init', '--yes'], ['status'], ['pause'], ['resume'], ['status', '--json']]) {
+  const snapshot = () => Object.fromEntries(walk(root).map((file) => [path.relative(root, file).split(path.sep).join('/'), hash(file)]));
+  // Its folder, its store, its refs and the objects behind them, and one exclude line.
+  const allowed = (file) => file.startsWith('product-decisions/') || file.startsWith('.git/product-decisions/')
+    || file === '.git/info/exclude' || file.startsWith('.git/objects/')
+    || file.startsWith('.git/refs/heads/product-decisions/') || file.startsWith('.git/logs/refs/heads/product-decisions/');
+  const before = { files: snapshot(), status: git(root, 'status', '--porcelain'), head: git(root, 'rev-parse', 'HEAD') };
+  for (const args of [['init', '--yes'], ['status'], ['pause'], ['resume'], ['status', '--json'], ['sync', '--no-push']]) {
     assert.equal(runCli(args, { cwd: root }).status, 0, args.join(' '));
   }
-  assert.deepEqual(snapshot(), before.files);
+  const after = snapshot();
+  const touched = [...new Set([...Object.keys(before.files), ...Object.keys(after)])].filter((file) => before.files[file] !== after[file]);
+  assert.deepEqual(touched.filter((file) => !allowed(file)), []);
   assert.equal(git(root, 'status', '--porcelain'), before.status);
+  assert.equal(git(root, 'rev-parse', 'HEAD'), before.head);
 });
 
 test('help works, and an unknown command fails', (t) => {
@@ -275,4 +280,164 @@ test('help works, and an unknown command fails', (t) => {
   const unknown = runCli(['nope'], { cwd: root });
   assert.equal(unknown.status, 1);
   assert.match(unknown.stderr, /Unknown command/);
+});
+
+// Project declaration, joining, and the local folder (M2).
+const { DOCS_REF, readRef, readTreeFiles, readBlob } = require('../plugin/src/git/plumbing.js');
+const { readConfig } = require('../plugin/src/core/config.js');
+
+function withRemote(t) {
+  const { root, base } = repo(t);
+  const remote = path.join(base, 'remote.git');
+  git(base, 'init', '-q', '--bare', remote);
+  git(root, 'remote', 'add', 'origin', remote);
+  git(root, 'push', '-q', 'origin', 'main');
+  return { root, base, remote };
+}
+const docsConfig = (root) => JSON.parse(readBlob(root, readTreeFiles(root, readRef(root, DOCS_REF)).get('config.json')).toString());
+
+test('the first init creates the docs branch with config.json and nothing on code branches', (t) => {
+  const { root } = repo(t);
+  const before = { head: git(root, 'rev-parse', 'HEAD'), branches: git(root, 'branch', '--list') };
+  const result = runCli(['init', '--yes', '--language', 'es', '--track', 'PRD.md'], { cwd: root });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(docsConfig(root), { schema_version: 1, folder: 'product-decisions', language: 'es', tracked_documents: ['PRD.md'], publish: { raw: 'auto' }, redact_patterns: [] });
+  assert.equal(git(root, 'rev-parse', 'HEAD'), before.head);
+  assert.deepEqual(git(root, 'branch', '--format=%(refname:short)').split('\n').sort(), ['main', 'product-decisions/docs']);
+  assert.equal(git(root, 'status', '--porcelain'), '');
+  assert.equal(readConfig(common(root)).language, 'es');
+});
+
+test('init creates the folder, excluded and invisible', (t) => {
+  const { root } = repo(t);
+  init(root);
+  assert.equal(fs.existsSync(path.join(root, 'product-decisions', 'config.json')), true);
+  assert.equal(git(root, 'status', '--porcelain'), '');
+});
+
+test('a second person joins an existing declaration from the remote and keeps its config', (t) => {
+  const { root, base, remote } = withRemote(t);
+  runCli(['init', '--yes', '--language', 'es', '--track', 'PRD.md'], { cwd: root });
+  git(root, 'push', '-q', 'origin', DOCS_REF);
+  const second = path.join(base, 'second');
+  git(base, 'clone', '-q', remote, second);
+  git(second, 'config', 'user.name', 'Second Person');
+  const result = runCli(['init', '--yes', '--language', 'en'], { cwd: second });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Joined/);
+  assert.equal(readConfig(path.join(second, '.git')).language, 'es');
+  assert.deepEqual(readConfig(path.join(second, '.git')).tracked_documents, ['PRD.md']);
+  assert.equal(readRef(second, DOCS_REF), readRef(root, DOCS_REF));
+});
+
+test('re-running init after activation completes a missing declaration', (t) => {
+  const { root } = repo(t);
+  init(root);
+  // Simulate an M1 activation: no declaration yet.
+  git(root, 'update-ref', '-d', DOCS_REF);
+  fs.rmSync(path.join(common(root), 'product-decisions', 'config.json'), { force: true });
+  const again = runCli(['init', '--yes'], { cwd: root });
+  assert.equal(again.status, 0, again.stderr);
+  assert.notEqual(readRef(root, DOCS_REF), null);
+  assert.equal(ofType(root, 'consent').length, 1);
+});
+
+test('--track on a missing file fails clearly, and changes nothing', (t) => {
+  const { root } = repo(t);
+  const result = runCli(['init', '--yes', '--track', 'NOPE.md'], { cwd: root });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /NOPE\.md/);
+  assert.equal(fs.existsSync(storeOf(root)), false);
+  assert.equal(readRef(root, DOCS_REF), null);
+});
+
+test('the consent event records flag or interactive', (t) => {
+  const { root } = repo(t);
+  init(root);
+  assert.equal(ofType(root, 'consent')[0].payload.method, 'flag');
+});
+
+test('the consent event is written before the state, so a failed append activates nothing', (t) => {
+  const { root } = repo(t);
+  fs.mkdirSync(path.join(storeOf(root), 'raw'), { recursive: true });
+  fs.writeFileSync(path.join(storeOf(root), 'raw', 'cli'), 'a file where a folder should be');
+  const result = runCli(['init', '--yes'], { cwd: root });
+  assert.equal(result.status, 1);
+  assert.equal(readLocal(common(root)), null);
+});
+
+test('init on a paused repository says so', (t) => {
+  const { root } = repo(t);
+  init(root);
+  runCli(['pause'], { cwd: root });
+  assert.match(runCli(['init', '--yes'], { cwd: root }).stdout, /paused/i);
+});
+
+test('a folder name that exists in the project is refused, with nothing changed', (t) => {
+  const { root } = repo(t);
+  fs.mkdirSync(path.join(root, 'product-decisions'));
+  fs.writeFileSync(path.join(root, 'product-decisions', 'real.md'), 'project content');
+  const result = runCli(['init', '--yes'], { cwd: root });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /--folder/);
+  assert.equal(readLocal(common(root)), null);
+  const other = runCli(['init', '--yes', '--folder', 'decision-record'], { cwd: root });
+  assert.equal(other.status, 0, other.stderr);
+  assert.equal(fs.existsSync(path.join(root, 'decision-record', 'config.json')), true);
+  assert.equal(fs.readFileSync(path.join(root, 'product-decisions', 'real.md'), 'utf8'), 'project content');
+});
+
+test('a folder name with path separators or .. is refused', (t) => {
+  const { root } = repo(t);
+  for (const folder of ['../out', 'a/b', '..']) {
+    const result = runCli(['init', '--yes', '--folder', folder], { cwd: root });
+    assert.equal(result.status, 1, folder);
+  }
+  assert.equal(readLocal(common(root)), null);
+});
+
+test('init works with no commits, and on a detached HEAD', (t) => {
+  const { root: empty, cleanup } = makeRepo({ commit: false });
+  t.after(cleanup);
+  assert.equal(init(empty).status, 0);
+  assert.notEqual(readRef(empty, DOCS_REF), null);
+  const { root } = repo(t);
+  git(root, 'checkout', '-q', '--detach');
+  assert.equal(init(root).status, 0);
+});
+
+test('init from a linked worktree creates the folder in the main checkout', (t) => {
+  const { root } = repo(t);
+  const wt = path.join(path.dirname(root), 'wt');
+  git(root, 'worktree', 'add', '-q', '-b', 'wt', wt);
+  assert.equal(runCli(['init', '--yes'], { cwd: wt }).status, 0);
+  assert.equal(fs.existsSync(path.join(root, 'product-decisions')), true);
+  assert.equal(fs.existsSync(path.join(wt, 'product-decisions')), false);
+});
+
+test('after git clean -fdx, or after deleting the folder, sync restores it', (t) => {
+  const { root } = repo(t);
+  init(root);
+  git(root, 'clean', '-q', '-fdx');
+  assert.equal(fs.existsSync(path.join(root, 'product-decisions')), false);
+  assert.equal(runCli(['sync', '--no-push'], { cwd: root }).status, 0);
+  assert.equal(fs.existsSync(path.join(root, 'product-decisions', 'config.json')), true);
+  fs.rmSync(path.join(root, 'product-decisions'), { recursive: true });
+  runCli(['sync', '--no-push'], { cwd: root });
+  assert.equal(fs.existsSync(path.join(root, 'product-decisions', 'config.json')), true);
+});
+
+test('patterns in the project config are redacted, along with the personal ones', (t) => {
+  const { root } = repo(t);
+  init(root);
+  const config = readConfig(common(root));
+  require('../plugin/src/core/config.js').writeConfigCopy(common(root), { ...config, redact_patterns: ['PROJECT-[0-9]+'] });
+  hook(root, 'UserPromptSubmit.json', { prompt: 'about PROJECT-42' });
+  assert(!storeText(root).includes('PROJECT-42'));
+});
+
+test('init gives the activated state a private salt', (t) => {
+  const { root } = repo(t);
+  init(root);
+  assert.match(readLocal(common(root)).salt, /^[0-9a-f]{64}$/);
 });

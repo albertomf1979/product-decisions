@@ -12,11 +12,15 @@ function loadAdapter(tool) {
 }
 
 /** Replaces the payload with what may be stored: secret files hashed, secrets redacted. */
-function sanitize(normalized, raw, state) {
+function sanitize(normalized, raw, state, commonDir) {
   const { redactValue, protectSecretFiles, compileExtra, oversizedPayload } = require('../core/redact.js');
   const home = require('node:os').homedir();
   return oversizedPayload(raw)
-    || redactValue(protectSecretFiles(normalized.payload, state.salt), compileExtra(state.redact_patterns), home);
+    || redactValue(
+      protectSecretFiles(normalized.payload, state.salt),
+      compileExtra([...(state.redact_patterns || []), ...require('../core/config.js').readConfig(commonDir).redact_patterns]),
+      home,
+    );
 }
 
 /** A subagent's model is unknown here: assuming the main agent's would be a guess. */
@@ -49,7 +53,7 @@ function capture({ payload, raw, location, state, tool, adapter, cwd }) {
   const { rawFilePath, appendLine } = require('../core/store.js');
   const { logLatency } = require('../core/diagnostics.js');
 
-  normalized.payload = sanitize(normalized, raw, state);
+  normalized.payload = sanitize(normalized, raw, state, location.commonDir);
   // Masked like the payload, so paths inside it still read as relative to the session.
   const { maskHome } = require('../core/redact.js');
   const home = require('node:os').homedir();
