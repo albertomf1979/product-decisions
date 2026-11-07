@@ -17,8 +17,8 @@ const { resolveCommit, newCommits } = require('./commits.js');
 const { readTranscriptTail } = require('./enrich.js');
 const { sealFile } = require('./seal.js');
 
-/** Steps later tasks add: document tracking and rendering. */
-const steps = { documents: null, render: null };
+/** Steps a later task adds: document tracking. */
+const steps = { documents: null };
 
 function readEvents(file) {
   const lines = fs.readFileSync(file, 'utf8').split('\n');
@@ -91,7 +91,7 @@ async function runTurn(job, { commonDir, now = new Date() }) {
 
   if (steps.documents) await steps.documents({ job, commonDir, state, location, git, events, now });
   sealFile(file, { now });
-  if (steps.render) await steps.render({ job, commonDir, state, now });
+  require('./render.js').refreshFolder({ commonDir });
 }
 
 /**
