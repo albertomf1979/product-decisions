@@ -5,6 +5,15 @@
 
 const { excerpt, escapeMarkdown, code } = require('./excerpt.js');
 const { t } = require('./i18n.js');
+const { maskHome } = require('../../core/redact.js');
+
+/** Masks the home folder in every string, keys included: older events may predate masking at capture. */
+function maskDeep(value, home) {
+  if (typeof value === 'string') return maskHome(value, home);
+  if (Array.isArray(value)) return value.map((item) => maskDeep(item, home));
+  if (value === null || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.entries(value).map(([k, v]) => [maskHome(k, home), maskDeep(v, home)]));
+}
 
 const TOOL_EVENTS = new Set(['tool_call', 'tool_failure', 'tool_denied']);
 const byText = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
@@ -136,10 +145,11 @@ function coverageNote(lang, tool) {
 /**
  * @param {object[]} events Every event of one session on one machine, in file order.
  * @param {object} config The project config.
- * @param {{ machine: string, gaps?: Array<{ from: string, to: string }> }} context
+ * @param {{ machine: string, gaps?: Array<{ from: string, to: string }>, home?: string | null }} context
  * @returns {Map<string, string>} The chronicle and the session's data file.
  */
-function renderSession(events, config, { machine, gaps = [] }) {
+function renderSession(rawEvents, config, { machine, gaps = [], home = null }) {
+  const events = home ? maskDeep(rawEvents, home) : rawEvents;
   const data = sessionData(events, { machine });
   const start = Date.parse(data.started);
   const end = data.ended ? Date.parse(data.ended) : Infinity;

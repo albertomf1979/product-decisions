@@ -66,7 +66,8 @@ function buildDocsFiles({ location, commonDir, state, config, bases = [] }) {
 
   const gaps = gapsOf(commonDir, state.machine);
   for (const events of ownSessions(commonDir, state.machine)) {
-    for (const [file, content] of renderSession(events, config, { machine: state.machine, gaps })) files.set(file, Buffer.from(content));
+    const home = require('node:os').homedir();
+    for (const [file, content] of renderSession(events, config, { machine: state.machine, gaps, home })) files.set(file, Buffer.from(content));
   }
   const overlay = overlayDir(commonDir);
   for (const full of walk(overlay)) files.set(path.relative(overlay, full).split(path.sep).join('/'), fs.readFileSync(full));

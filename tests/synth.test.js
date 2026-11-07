@@ -180,3 +180,12 @@ test('a turn renders the session into the folder', async (t) => {
   assert(fs.readFileSync(path.join(folder, 'README.md'), 'utf8').includes('timeline/'));
   void activate;
 });
+
+test('the home folder is masked when rendering, even in events captured before masking existed', () => {
+  const events = fullSession().map((e) => (e.event_type === 'tool_call' && e.summary === 'Edit src/login.js'
+    ? { ...e, summary: 'Read /Users/someone/secret-project/a.md', sources: [{ type: 'file', path: '/Users/someone/secret-project/a.md', commit: 'abc' }] }
+    : e));
+  const files = renderSession(events, DEFAULT_CONFIG, { ...context, home: '/Users/someone' });
+  for (const content of files.values()) assert(!content.includes('/Users/someone'), 'home must be masked');
+  assert([...files.values()].join('').includes('~/secret-project/a.md'));
+});
