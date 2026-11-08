@@ -15,6 +15,7 @@ const { makeRepo, activate, git } = require('./helpers/repo.js');
 const { runHook, assertSilent, fixture, capturedEvents } = require('./helpers/hook-runner.js');
 
 const TRANSCRIPT = path.join(__dirname, 'fixtures', 'claude-code', 'transcript-sample.jsonl');
+const ENRICH = path.join(__dirname, 'fixtures', 'claude-code', 'transcript-enrich.jsonl');
 
 function setup(t, options) {
   const repo = makeRepo(options);
@@ -206,6 +207,8 @@ test('events are written with origin derived and the session id of the job', asy
   for (const event of capturedEvents(root, { all: true }).filter((e) => e.event_type !== 'user_prompt')) {
     assert.equal(event.origin, 'derived');
     assert.equal(event.session_id, 's1');
+    // Text recovered from the transcript keeps the actor who wrote it.
+    if (event.payload.source === 'transcript' && event.event_type !== 'model_usage') continue;
     assert.deepEqual(event.actor, { type: 'plugin', name: 'product-decisions' });
   }
 });
@@ -284,4 +287,77 @@ test('recovery finds sessions with unsealed events', async (t) => {
   assert.equal(found[0].kind, 'close');
   assert.equal(found[0].sessionId, 's1');
   assert.equal(found[0].cwd, root);
+});
+
+function finalResponse(root, text) {
+  const event = buildEvent(
+    { eventType: 'agent_response', actorType: 'llm', llmName: 'claude', agent: { name: 'main' }, payload: { last_assistant_message: text } },
+    { tool: 'claude-code', sessionId: 's1', actorName: null, git: null, sources: [], summary: 'done' },
+  );
+  fs.appendFileSync(file(root), `${JSON.stringify(event)}\n`);
+  return event;
+}
+function subagentStop(root, id) {
+  const event = buildEvent(
+    { eventType: 'subagent_stop', actorType: 'subagent', agent: { name: 'general-purpose', id }, payload: {} },
+    { tool: 'claude-code', sessionId: 's1', actorName: null, git: null, sources: [], summary: 'stop' },
+  );
+  fs.appendFileSync(file(root), `${JSON.stringify(event)}\n`);
+}
+
+test('runTurn adds intermediate text once, even when run twice', async (t) => {
+  const root = setup(t);
+  seed(root);
+  finalResponse(root, 'Done: the scope section is at the end of the PRD.');
+  await runTurn(job(root, { transcriptPath: ENRICH }), { commonDir: common(root) });
+  fs.rmSync(path.join(common(root), 'product-decisions', 'sessions'), { recursive: true, force: true });
+  await runTurn(job(root, { transcriptPath: ENRICH }), { commonDir: common(root) });
+  const intermediate = ofType(root, 'agent_response').filter((e) => e.payload.intermediate);
+  assert.equal(intermediate.length, 2);
+  assert.ok(intermediate.every((e) => e.origin === 'derived' && e.actor.type === 'llm'));
+  assert.equal(intermediate[0].timestamp.slice(0, 10), '2026-11-08');
+  assert.equal(ofType(root, 'tool_denied').length, 1);
+  assert.deepEqual(verifyFile(file(root)).problems, []);
+});
+
+test('transcript text is redacted like captured payloads', async (t) => {
+  const root = setup(t);
+  seed(root);
+  const transcript = path.join(root, '..', 'secret-transcript.jsonl');
+  const secret = `sk-ant-api03-${'a'.repeat(90)}`;
+  fs.writeFileSync(transcript, `${JSON.stringify({ type: 'assistant', uuid: 'u1', timestamp: '2026-11-08T09:00:00.000Z', message: { id: 'm1', model: 'claude-opus-5-5', content: [{ type: 'text', text: `key ${secret}` }] } })}\n`);
+  t.after(() => fs.rmSync(transcript, { force: true }));
+  await runTurn(job(root, { transcriptPath: transcript }), { commonDir: common(root) });
+  assert.ok(!fs.readFileSync(file(root), 'utf8').includes(secret));
+});
+
+test('a close job records closed_through and one model_usage per model with token totals', async (t) => {
+  const root = setup(t);
+  seed(root);
+  const last = finalResponse(root, 'Done: the scope section is at the end of the PRD.');
+  await runTurn(job(root, { kind: 'close', transcriptPath: ENRICH }), { commonDir: common(root) });
+  assert.equal(readSessionMeta(common(root), 'claude-code', 's1').closed_through, last.event_id);
+  const totals = ofType(root, 'model_usage').filter((e) => e.payload.usage);
+  assert.deepEqual(totals.map((e) => [e.payload.model, e.payload.usage]), [
+    ['claude-opus-5-5', { input_tokens: 60, output_tokens: 170, cache_read_input_tokens: 3000, cache_creation_input_tokens: 300 }],
+    ['claude-sonnet-5-5', { input_tokens: 40, output_tokens: 60, cache_read_input_tokens: 1000, cache_creation_input_tokens: 100 }],
+  ]);
+});
+
+test('a turn job records no closed_through', async (t) => {
+  const root = setup(t);
+  seed(root);
+  await runTurn(job(root, { transcriptPath: ENRICH }), { commonDir: common(root) });
+  assert.equal(readSessionMeta(common(root), 'claude-code', 's1').closed_through, undefined);
+});
+
+test('a finished subagent gets its model from its meta file, once', async (t) => {
+  const root = setup(t);
+  seed(root);
+  subagentStop(root, 'a0f1e2d3c4b5a6978');
+  await runTurn(job(root, { transcriptPath: ENRICH }), { commonDir: common(root) });
+  await runTurn(job(root, { transcriptPath: ENRICH }), { commonDir: common(root) });
+  const sub = ofType(root, 'model_usage').filter((e) => e.agent && e.agent.id === 'a0f1e2d3c4b5a6978');
+  assert.equal(sub.length, 1);
+  assert.equal(sub[0].payload.model, 'claude-opus-5-5');
 });

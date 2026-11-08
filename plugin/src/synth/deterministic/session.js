@@ -83,7 +83,8 @@ function lineFor(event, lang) {
     case 'session_start': return t(lang, 'session_start', { source: p.source });
     case 'session_end': return t(lang, 'session_end', { reason: p.reason });
     case 'user_prompt': return `${t(lang, 'prompt')}: ${excerpt(p.prompt)}`;
-    case 'agent_response': return `${t(lang, 'response')}: ${excerpt(p.last_assistant_message)}`;
+    case 'agent_response': return `${t(lang, p.intermediate ? 'intermediate' : 'response')}: ${excerpt(p.last_assistant_message)}`;
+    case 'tool_denied': return p.source === 'transcript' ? t(lang, 'denied_transcript') : excerpt(event.summary);
     case 'subagent_start': return t(lang, 'subagent_start', { name: escapeMarkdown(event.agent.name) });
     case 'subagent_stop': return t(lang, 'subagent_stop', { name: escapeMarkdown(event.agent.name) });
     case 'compaction': return t(lang, 'compaction', { stage: p.stage, trigger: p.trigger });

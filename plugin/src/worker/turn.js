@@ -10,11 +10,11 @@ const { readLocal, storeDir } = require('../core/state.js');
 const { rawFilePath, appendLine, readSessionMeta, writeSessionMeta } = require('../core/store.js');
 const { buildEvent } = require('../core/event.js');
 const { readGit } = require('../core/githead.js');
-const { redactString, compileExtra } = require('../core/redact.js');
+const { redactString, redactValue, compileExtra } = require('../core/redact.js');
 const { oneLine } = require('../core/text.js');
 const { snapshot } = require('./snapshot.js');
 const { resolveCommit, newCommits } = require('./commits.js');
-const { readTranscriptTail } = require('./enrich.js');
+const { readTranscriptTail, readTranscriptSince, transcriptEvents, addTokenTotals, subagentModel } = require('./enrich.js');
 const { sealFile } = require('./seal.js');
 
 
@@ -103,6 +103,17 @@ async function runTurn(job, { commonDir, now = new Date() }) {
     }
   }
 
+  if (job.transcriptPath) {
+    enrichFromTranscript({ job, commonDir, file, events: readEvents(file), state, extra, home, git });
+  }
+  if (job.kind === 'close') {
+    const through = lastCaptured(events);
+    writeSessionMeta(commonDir, job.tool, job.sessionId, {
+      ...(readSessionMeta(commonDir, job.tool, job.sessionId) || {}), closed_through: through ? through.event_id : null,
+    });
+    addTokenEvents({ job, commonDir, file, events: readEvents(file), git, now });
+  }
+
   if (location) {
     const { checkDocuments } = require('./documents.js');
     const { readConfig } = require('../core/config.js');
@@ -111,6 +122,68 @@ async function runTurn(job, { commonDir, now = new Date() }) {
   }
   sealFile(file, { now });
   require('./render.js').refreshFolder({ commonDir });
+}
+
+const sameUsage = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+function appendDerived(file, { eventType, actorType, agent, payload, summary }, { job, actorName, git, now }) {
+  appendLine(file, JSON.stringify(buildEvent(
+    { eventType, actorType, llmName: 'claude', agent, payload },
+    { tool: job.tool, sessionId: job.sessionId, actorName, git, sources: [], summary, origin: 'derived', now },
+  )));
+}
+
+/**
+ * Best-effort enrichment from the transcript (PRD CAP-13): intermediate text, denials by
+ * a person, token totals, and subagent models. Hooks stay the source of truth, and
+ * every derived payload is redacted like a captured one.
+ */
+function enrichFromTranscript({ job, commonDir, file, events, state, extra, home, git }) {
+  const meta = readSessionMeta(commonDir, job.tool, job.sessionId) || {};
+  let offset = Number.isInteger(meta.transcript_offset) ? meta.transcript_offset : 0;
+  try {
+    if (fs.statSync(job.transcriptPath).size < offset) offset = 0;
+  } catch {
+    return;
+  }
+  const { records, nextOffset } = readTranscriptSince(job.transcriptPath, offset);
+  const seenUuids = new Set(events.map((e) => e.payload && e.payload.transcript_uuid).filter(Boolean));
+  const capturedTexts = new Set(events.filter((e) => e.event_type === 'agent_response' && e.origin !== 'derived')
+    .map((e) => e.payload && e.payload.last_assistant_message).filter((x) => typeof x === 'string'));
+  for (const found of transcriptEvents(records, { capturedTexts, seenUuids })) {
+    const at = found.at && !Number.isNaN(Date.parse(found.at)) ? new Date(found.at) : new Date();
+    appendDerived(file, { ...found, payload: redactValue(found.payload, extra, home), summary: redactString(found.summary, extra, home) },
+      { job, actorName: found.actorType === 'user' ? state.actor_name : null, git, now: at });
+  }
+  const counted = new Set(offset === 0 ? [] : (meta.token_last_ids || []));
+  const totals = addTokenTotals(offset === 0 ? {} : meta.token_totals, records, counted);
+
+  const known = new Set(events.filter((e) => e.event_type === 'model_usage' && e.agent && e.agent.id).map((e) => e.agent.id));
+  for (const stop of events.filter((e) => e.event_type === 'subagent_stop' && e.agent && e.agent.id && !known.has(e.agent.id))) {
+    known.add(stop.agent.id);
+    const model = subagentModel(job.transcriptPath, stop.agent.id);
+    if (model) {
+      appendDerived(file, { eventType: 'model_usage', actorType: 'plugin', agent: { name: stop.agent.name, id: stop.agent.id }, payload: { model, source: 'transcript' }, summary: `Model ${model} (subagent ${stop.agent.name})` },
+        { job, actorName: null, git, now: new Date() });
+    }
+  }
+  writeSessionMeta(commonDir, job.tool, job.sessionId, {
+    ...(readSessionMeta(commonDir, job.tool, job.sessionId) || {}),
+    transcript_offset: nextOffset, token_totals: totals, token_last_ids: [...counted].slice(-50),
+  });
+}
+
+/** At close: one model_usage per model with the main agent's token totals so far. */
+function addTokenEvents({ job, commonDir, file, events, git, now }) {
+  const totals = (readSessionMeta(commonDir, job.tool, job.sessionId) || {}).token_totals || {};
+  for (const model of Object.keys(totals).sort()) {
+    const usage = totals[model];
+    const previous = [...events].reverse().find((e) => e.event_type === 'model_usage' && e.payload && e.payload.model === model && e.payload.usage);
+    if (previous && sameUsage(previous.payload.usage, usage)) continue;
+    const input = usage.input_tokens + usage.cache_read_input_tokens + usage.cache_creation_input_tokens;
+    appendDerived(file, { eventType: 'model_usage', actorType: 'plugin', agent: { name: 'main' }, payload: { model, usage, source: 'transcript' }, summary: `Tokens for ${model}: ${input} in, ${usage.output_tokens} out` },
+      { job, actorName: null, git, now });
+  }
 }
 
 /**

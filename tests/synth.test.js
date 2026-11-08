@@ -189,3 +189,32 @@ test('the home folder is masked when rendering, even in events captured before m
   for (const content of files.values()) assert(!content.includes('/Users/someone'), 'home must be masked');
   assert([...files.values()].join('').includes('~/secret-project/a.md'));
 });
+
+test('the chronicle shows intermediate text and transcript denials, labelled as such', () => {
+  n = 0;
+  const events = [
+    ev('session_start', { actorType: 'user', payload: { source: 'startup' } }),
+    ev('agent_response', { origin: 'derived', payload: { last_assistant_message: 'Reading the PRD first.', intermediate: true, source: 'transcript' } }),
+    ev('tool_denied', { actorType: 'user', origin: 'derived', payload: { tool_use_id: 't1', source: 'transcript' } }),
+  ];
+  const chronicle = [...renderSession(events, DEFAULT_CONFIG, context).values()][0];
+  assert.match(chronicle, /Intermediate text: Reading the PRD first\./);
+  assert.match(chronicle, /Tool call denied \(from the transcript\)/);
+  const es = [...renderSession(events, { ...DEFAULT_CONFIG, language: 'es' }, context).values()][0];
+  assert.match(es, /Texto intermedio: Reading the PRD first\./);
+  assert.match(es, /Llamada denegada \(según la transcripción\)/);
+});
+
+test('the chronicle orders events by time, even when derived ones were appended later', () => {
+  n = 0;
+  const start = ev('session_start', { actorType: 'user', payload: { source: 'startup' } });
+  const response = ev('agent_response', { payload: { last_assistant_message: 'FINAL-ANSWER' } });
+  const early = { ...ev('agent_response', { origin: 'derived', payload: { last_assistant_message: 'EARLY-THOUGHT', intermediate: true, source: 'transcript' } }), timestamp: new Date(Date.parse(response.timestamp) - 500).toISOString() };
+  const chronicle = [...renderSession([start, response, early], DEFAULT_CONFIG, context).values()][0];
+  assert.ok(chronicle.indexOf('EARLY-THOUGHT') < chronicle.indexOf('FINAL-ANSWER'));
+});
+
+test('the coverage note says what comes from the transcript', () => {
+  assert.match(tr('en', 'coverage_claude-code'), /transcript/);
+  assert.match(tr('es', 'coverage_claude-code'), /transcripción/);
+});
