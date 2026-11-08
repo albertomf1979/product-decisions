@@ -30,6 +30,12 @@ const DICTIONARY = {
     when: 'When', session: 'Session', by: 'By', branch: 'Branch',
     outside_session: 'Outside a session: no captured action touched this file, so nobody is named.', outside_session_short: 'outside a session',
     binary_note: 'Binary document: only its hash is recorded, with no diff.',
+    adr_note: 'Inferred by product-decisions from the record with an LLM. The plugin never rewrites this file. To correct it, edit it on the product-decisions/docs branch.',
+    status: 'Status', status_inferred: 'Accepted (inferred)', decided_by: 'Decided by', evidence: 'Evidence', related: 'Related', supersedes: 'Supersedes',
+    none_lower: 'none', context: 'Context', decision_heading: 'Decision', alternatives: 'Alternatives considered', consequences: 'Consequences',
+    no_alternatives: 'None shown in the record.', no_sources: 'None.', session_word: 'session',
+    actor_user: 'user', actor_llm: 'LLM', actor_subagent: 'subagent', phase: 'Phase',
+    phase_discovery: 'Discovery', phase_definition: 'Definition', phase_design: 'Design', phase_development: 'Development', phase_release: 'Release', phase_monitoring: 'Monitoring',
   },
   es: {
     session_title: 'Sesión {date}, {tool}, {session}',
@@ -60,6 +66,12 @@ const DICTIONARY = {
     when: 'Cuándo', session: 'Sesión', by: 'Por', branch: 'Rama',
     outside_session: 'Fuera de una sesión: ninguna acción capturada tocó este fichero, así que no se nombra a nadie.', outside_session_short: 'fuera de una sesión',
     binary_note: 'Documento binario: solo se registra su hash, sin diff.',
+    adr_note: 'Inferido por product-decisions a partir del registro con un LLM. El plugin nunca reescribe este fichero. Para corregirlo, edítalo en la rama product-decisions/docs.',
+    status: 'Estado', status_inferred: 'Aceptada (inferida)', decided_by: 'Decidida por', evidence: 'Evidencia', related: 'Relacionadas', supersedes: 'Sustituye a',
+    none_lower: 'ninguna', context: 'Contexto', decision_heading: 'Decisión', alternatives: 'Alternativas consideradas', consequences: 'Consecuencias',
+    no_alternatives: 'El registro no muestra ninguna.', no_sources: 'Ninguna.', session_word: 'sesión',
+    actor_user: 'persona', actor_llm: 'LLM', actor_subagent: 'subagente', phase: 'Fase',
+    phase_discovery: 'Descubrimiento', phase_definition: 'Definición', phase_design: 'Diseño', phase_development: 'Desarrollo', phase_release: 'Lanzamiento', phase_monitoring: 'Seguimiento',
   },
 };
 
