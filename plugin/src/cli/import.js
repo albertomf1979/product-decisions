@@ -12,6 +12,8 @@ const { consentIsCurrent } = require('../core/consent.js');
 const { rawFilePath, appendLine, readSessionMeta, writeSessionMeta } = require('../core/store.js');
 const { buildEvent, formatTimestamp } = require('../core/event.js');
 const { readGit } = require('../core/githead.js');
+const { locateRepo, samePath } = require('../core/locate.js');
+const { storeDir } = require('../core/state.js');
 const { maskHome } = require('../core/redact.js');
 const { UsageError, requireRepo } = require('./shared.js');
 const { IMPORTER_VERSION, readTranscript, toPayloads, findTranscripts, checkouts } = require('../import/claude-code.js');
@@ -53,6 +55,24 @@ function rootOf(roots, folder) {
   return null;
 }
 
+/** Every transcript key already in this repository's record, from any session. */
+function recordedKeys(commonDir) {
+  const dir = path.join(storeDir(commonDir), 'raw', TOOL);
+  const keys = new Set();
+  let names = [];
+  try {
+    names = fs.readdirSync(dir).filter((name) => name.endsWith('.jsonl'));
+  } catch {
+    return keys;
+  }
+  for (const name of names) {
+    for (const event of readEvents(path.join(dir, name))) {
+      if (event.payload && typeof event.payload.transcript_uuid === 'string') keys.add(event.payload.transcript_uuid);
+    }
+  }
+  return keys;
+}
+
 const add = (counts, key, n = 1) => {
   if (n) counts[key] = (counts[key] || 0) + n;
 };
@@ -76,6 +96,22 @@ function importSessions({ location, state, dryRun = false, sessionFilter = null,
   const linked = new Set(checkouts(location).slice(1));
   const pauses = pausesOf(location.commonDir, state.machine);
   const paused = (ms) => pauses.some(([from, to]) => ms >= from && ms <= to);
+  // A folder inside the repository that belongs to a nested repository is not this one's,
+  // as on the capture path. A folder deleted since resolves to this repository.
+  const owned = new Map();
+  const placeOf = (cwd) => {
+    if (owned.has(cwd)) return owned.get(cwd);
+    let place = rootOf(roots, cwd);
+    if (place) {
+      const found = locateRepo(cwd);
+      if (found && !samePath(found.commonDir, location.commonDir)) place = null;
+    }
+    owned.set(cwd, place);
+    return place;
+  };
+  // Keys from every session, kept up to date as this run goes: a forked session repeats
+  // its parent's records, and a record must enter the record once.
+  const seen = recordedKeys(location.commonDir);
 
   const sessions = [];
   const left = {};
@@ -92,21 +128,31 @@ function importSessions({ location, state, dryRun = false, sessionFilter = null,
       session.status = 'captured';
       continue;
     }
-    const seen = new Set(existing.map((event) => event.payload && event.payload.transcript_uuid).filter((key) => typeof key === 'string'));
     const read = readTranscript(transcript.file);
     damaged += read.damaged;
-    const { items, skipped } = toPayloads(read.records, { sessionId: transcript.sessionId });
+    // Records from elsewhere, or written during a pause, are dropped before anything else
+    // is read from them: only their cwd and time are looked at.
+    const kept = [];
+    for (const record of read.records) {
+      const ms = Date.parse(record.timestamp);
+      if (typeof record.cwd === 'string' && !placeOf(record.cwd)) add(left, 'outside');
+      else if (Number.isFinite(ms) && paused(ms)) add(left, 'paused');
+      else kept.push(record);
+    }
+    const { items, skipped } = toPayloads(kept, { sessionId: transcript.sessionId });
     for (const [key, n] of Object.entries(skipped)) add(byType, key, n);
     Object.assign(session.skipped, skipped);
 
     const fresh = [];
     for (const item of items) {
       const at = Date.parse(item.at);
-      const place = rootOf(roots, item.cwd);
+      const place = typeof item.cwd === 'string' ? placeOf(item.cwd) : null;
       if (!place) add(left, 'outside');
       else if (!Number.isFinite(at)) add(left, 'no_time');
-      else if (paused(at)) add(left, 'paused');
-      else if (!seen.has(item.uuid)) fresh.push({ item, at, place });
+      else if (!seen.has(item.uuid)) {
+        seen.add(item.uuid);
+        fresh.push({ item, at, place });
+      }
     }
     if (fresh.length === 0) {
       session.status = existing.some((event) => event.event_type === 'import') ? 'unchanged' : 'empty';
@@ -127,6 +173,7 @@ function importSessions({ location, state, dryRun = false, sessionFilter = null,
       const raw = Buffer.from(JSON.stringify(item.payload));
       const event = buildCapturedEvent({
         payload: item.payload, raw, location, state, tool: TOOL, adapter, cwd: item.cwd, origin: 'imported', now: new Date(at), git,
+        model: item.model, toolVersion: item.version,
       });
       if (!event) continue;
       appendLine(file, JSON.stringify(event));
@@ -140,7 +187,7 @@ function importSessions({ location, state, dryRun = false, sessionFilter = null,
         payload: {
           importer_version: IMPORTER_VERSION,
           transcript: maskHome(transcript.file, home),
-          records_read: read.records.length,
+          records_read: kept.length,
           events: fresh.length,
           skipped,
           imported_at: formatTimestamp(now),
@@ -168,10 +215,10 @@ function importSessions({ location, state, dryRun = false, sessionFilter = null,
 
 const countOf = (sessions, ...statuses) => sessions.filter((s) => statuses.includes(s.status)).length;
 
-function report(outcome, transcripts, dryRun) {
+function report(outcome, transcripts, dryRun, llm) {
   const lines = [];
   const kinds = (kind) => transcripts.filter((t) => t.kind === kind).length;
-  lines.push(`Found ${transcripts.length} transcripts: ${kinds('repository')} in the repository, ${kinds('worktree')} in worktrees, ${kinds('ancestor')} in parent folders.`);
+  lines.push(`Found ${transcripts.length} transcripts: ${kinds('repository')} in the repository, ${kinds('worktree')} in worktrees, ${kinds('subfolder')} in subfolders, ${kinds('ancestor')} in parent folders.`);
   const { sessions } = outcome;
   const brought = sessions.filter((s) => s.status === 'imported' || s.status === 'grown');
   const events = brought.reduce((sum, s) => sum + s.events, 0);
@@ -188,12 +235,18 @@ function report(outcome, transcripts, dryRun) {
   if (types.length) lines.push(`Records skipped by type: ${types.join(', ')}.`);
   if (outcome.damaged) lines.push(`Damaged lines: ${outcome.damaged}.`);
   if (dryRun) lines.push('Dry run: nothing was written.');
-  else if (brought.length) lines.push('Imported sessions are ready for LLM synthesis. Run: product-decisions sync --llm');
+  else if (brought.length && llm && llm.off) lines.push('LLM synthesis is off for you here, so imported sessions keep their chronicle only.');
+  else if (llm && llm.sessions > 0) {
+    lines.push(`${llm.sessions} imported sessions wait for LLM synthesis, about ${llm.runs} runs. Automatic synthesis leaves them alone; sync --llm runs them all at once, past the daily cap of ${llm.cap} runs. Run: product-decisions sync --llm`);
+  }
   return lines.join('\n');
 }
 
 /** The import command. */
 async function importCommand({ cwd, flags, env = process.env }) {
+  if (flags.session !== null && flags.session !== undefined && (!flags.session || flags.session.startsWith('-'))) {
+    throw new UsageError('--session needs a session id. Usage: product-decisions import [--dry-run] [--session <id>]');
+  }
   const location = requireRepo(cwd);
   const state = readLocal(location.commonDir);
   if (!state || !state.activated) throw new UsageError('product-decisions is not active in this repository. Run: product-decisions init');
@@ -215,7 +268,8 @@ async function importCommand({ cwd, flags, env = process.env }) {
     if (!locked.ran) throw new UsageError('The background worker is busy. Try again in a moment.');
     outcome = locked.value;
   }
-  console.log(report(outcome, transcripts, flags.dryRun));
+  const llm = flags.dryRun ? null : await require('../worker/synthesis.js').importedBacklog(location.commonDir);
+  console.log(report(outcome, transcripts, flags.dryRun, llm));
   return 0;
 }
 

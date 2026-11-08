@@ -310,4 +310,28 @@ async function runSynthesis({ commonDir, force = false, now = new Date(), engine
   return result(totals.runs > 0 ? 'ran' : 'nothing', { ...totals, pending });
 }
 
-module.exports = { runSynthesis, pendingSessions, llmStatus, readLlmState, defaultEngine, effectiveLlm, engineFor };
+/**
+ * What an explicit run would start for imported sessions, which automatic synthesis
+ * leaves alone: how many wait, and about how many runs, one per chunk.
+ *
+ * @returns {{ off: boolean, sessions: number, runs: number, cap: number }}
+ */
+function importedBacklog(commonDir, { now = new Date() } = {}) {
+  const state = readLocal(commonDir);
+  const shared = readConfig(commonDir);
+  const caps = effectiveLlm(shared.llm);
+  const off = !state || state.llm_enabled === false || caps.enabled === false || caps.max_runs_per_day === 0;
+  const out = { off, sessions: 0, runs: 0, cap: caps.max_runs_per_day };
+  if (!state || !state.activated || off) return out;
+  const config = { ...shared, llm: caps };
+  const existing = existingDecisions({ location: locateStore(commonDir, state), commonDir, state, config });
+  for (const r of closedRanges(commonDir, state, readLlmState(commonDir), now)) {
+    if (!r.imported || !r.worth) continue;
+    const header = promptHeader({ session: r.sessionId, tool: r.tool, language: config.language, decisions: existing, maxChars: caps.max_input_chars });
+    out.sessions += 1;
+    out.runs += buildChunks(r.range, { maxChars: caps.max_input_chars, header }).length;
+  }
+  return out;
+}
+
+module.exports = { runSynthesis, pendingSessions, llmStatus, readLlmState, defaultEngine, effectiveLlm, engineFor, importedBacklog };

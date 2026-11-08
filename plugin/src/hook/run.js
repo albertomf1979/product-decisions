@@ -59,7 +59,7 @@ function resolveModel(normalized, commonDir, tool) {
  *
  * @returns {object | null}
  */
-function buildCapturedEvent({ payload, raw, location, state, tool, adapter, cwd, origin = 'hook', now, git }) {
+function buildCapturedEvent({ payload, raw, location, state, tool, adapter, cwd, origin = 'hook', now, git, model: transcriptModel = null, toolVersion: transcriptVersion = null }) {
   const normalized = adapter.normalize(payload);
   if (!normalized) return null;
 
@@ -76,7 +76,9 @@ function buildCapturedEvent({ payload, raw, location, state, tool, adapter, cwd,
   if (normalized.transcriptPath) normalized.transcriptPath = maskHome(normalized.transcriptPath, home);
   const { model, modelSource, toolVersion } = origin === 'hook'
     ? resolveModel(normalized, location.commonDir, tool)
-    : { model: normalized.modelHint ? normalized.modelHint.model : null, modelSource: normalized.modelHint ? normalized.modelHint.source : null, toolVersion: null };
+    : transcriptModel
+      ? { model: transcriptModel, modelSource: 'transcript', toolVersion: transcriptVersion }
+      : { model: normalized.modelHint ? normalized.modelHint.model : null, modelSource: normalized.modelHint ? normalized.modelHint.source : null, toolVersion: transcriptVersion };
   const gitState = git || readGit(location, payload.cwd || cwd);
   const event = buildEvent(normalized, {
     tool,

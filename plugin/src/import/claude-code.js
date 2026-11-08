@@ -15,6 +15,16 @@ const IMPORTER_VERSION = 1;
 // The denial text Claude Code writes when a person rejects a tool call, as in M3.
 const DENIAL = /doesn['’]t want to proceed|tool use was rejected/i;
 const INTERRUPT = /^\[Request interrupted by user/;
+// What a person runs outside the conversation: no hook ever sends it, so it is never a
+// prompt. Bash mode (`!`) output and local command output may hold anything.
+const BASH_MODE = /^\s*<bash-(?:input|stdout|stderr)>/;
+const LOCAL_COMMAND = /^\s*<local-command-(?:stdout|stderr)>/;
+const COMMAND_NAME = /<command-name>([\s\S]*?)<\/command-name>/;
+const COMMAND_ARGS = /<command-args>([\s\S]*?)<\/command-args>/;
+// Context the tool attaches to a prompt, not the person's words.
+const IDE_CONTEXT = /^\s*<ide_[a-z_]+>/;
+const REMINDER = /^\s*<system-reminder>/;
+const SYNTHETIC_MODEL = '<synthetic>';
 
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const stringOr = (value, fallback = null) => (typeof value === 'string' ? value : fallback);
@@ -56,7 +66,7 @@ function readTranscript(file) {
  * (sidechain), and system records are skipped, as is anything unknown, and each is
  * counted by type.
  *
- * @returns {{ items: Array<{ payload: object, at: string | null, uuid: string, cwd: string | null, gitBranch: string | null }>, skipped: Record<string, number> }}
+ * @returns {{ items: Array<{ payload: object, at: string | null, uuid: string, cwd: string | null, gitBranch: string | null, model: string | null, version: string | null }>, skipped: Record<string, number> }}
  */
 function toPayloads(records, { sessionId }) {
   const items = [];
@@ -67,6 +77,14 @@ function toPayloads(records, { sessionId }) {
   const calls = new Map();
   let turnStops = [];
   let compactTrigger = null;
+  // The model of the turn: a prompt before the first response takes the session's first.
+  const modelOf = (record) => {
+    const model = isObject(record) && record.type === 'assistant' && !record.isSidechain && isObject(record.message) ? record.message.model : null;
+    return typeof model === 'string' && model && model !== SYNTHETIC_MODEL ? model : null;
+  };
+  const list = Array.isArray(records) ? records : [];
+  let model = list.map(modelOf).find(Boolean) || null;
+  let version = list.map((record) => (isObject(record) ? stringOr(record.version) : null)).find(Boolean) || null;
 
   // The last text before the next prompt is the turn's response; the rest is intermediate.
   const closeTurn = () => {
@@ -75,7 +93,7 @@ function toPayloads(records, { sessionId }) {
     turnStops = [];
   };
 
-  for (const record of Array.isArray(records) ? records : []) {
+  for (const record of list) {
     if (!isObject(record)) {
       count('record:malformed');
       continue;
@@ -105,6 +123,8 @@ function toPayloads(records, { sessionId }) {
       continue;
     }
 
+    model = modelOf(record) || model;
+    version = stringOr(record.version) || version;
     const cwd = stringOr(record.cwd);
     const base = stringOr(record.uuid) || crypto.createHash('sha256').update(JSON.stringify(record)).digest('hex').slice(0, 32);
     let made = 0;
@@ -117,6 +137,8 @@ function toPayloads(records, { sessionId }) {
         uuid,
         cwd,
         gitBranch: stringOr(record.gitBranch),
+        model,
+        version,
       });
       return items.length - 1;
     };
@@ -163,16 +185,34 @@ function toPayloads(records, { sessionId }) {
     }
 
     for (const block of blocks) if (isObject(block) && block.type !== 'text') count(`block:${stringOr(block.type, 'unknown')}`);
-    const text = textOf(blocks.filter((block) => isObject(block) && block.type === 'text'));
+    const texts = blocks.filter((block) => {
+      if (!isObject(block) || block.type !== 'text') return false;
+      if (typeof content === 'string') return true;
+      if (IDE_CONTEXT.test(stringOr(block.text, ''))) count('ide_context');
+      else if (REMINDER.test(stringOr(block.text, ''))) count('reminder');
+      else return true;
+      return false;
+    });
+    const text = textOf(texts);
     if (!text.trim()) {
-      count('malformed');
+      if (texts.length || !blocks.some((block) => isObject(block) && block.type === 'text')) count('malformed');
       continue;
     }
+    const command = COMMAND_NAME.exec(text);
     if (record.isCompactSummary) {
       emit('PostCompact', { trigger: compactTrigger || 'auto', compact_summary: text });
       compactTrigger = null;
     } else if (INTERRUPT.test(text)) count('interrupt');
-    else {
+    else if (BASH_MODE.test(text)) count('bash_mode');
+    else if (LOCAL_COMMAND.test(text)) count('local_command');
+    else if (command) {
+      // A command is the person's prompt only through its arguments: /review the login page.
+      const args = (COMMAND_ARGS.exec(text) || [])[1];
+      if (args && args.trim()) {
+        closeTurn();
+        emit('UserPromptSubmit', { prompt: `${command[1].trim()} ${args.trim()}` });
+      } else count('command');
+    } else {
       closeTurn();
       emit('UserPromptSubmit', { prompt: text });
     }
@@ -214,23 +254,46 @@ function ancestors(folder, home) {
 
 /**
  * The transcripts Claude Code kept for this repository: sessions opened in the main
- * checkout, in each worktree, or in a folder above the repository (whose records the
- * importer then filters by cwd). Only file names are read here.
+ * checkout, in each worktree, in a folder below either (removed worktrees included), or
+ * in a folder above the repository. The importer then filters every record by cwd.
+ * Only file and folder names are read here. A folder below is known only by its encoded
+ * name, so its `folder` is null.
  *
- * @returns {Array<{ file: string, sessionId: string, folder: string, kind: 'repository' | 'worktree' | 'ancestor' }>}
+ * @returns {Array<{ file: string, sessionId: string, folder: string | null, kind: 'repository' | 'worktree' | 'subfolder' | 'ancestor' }>}
  */
 function findTranscripts(location, { env = process.env } = {}) {
   const home = env.HOME || env.USERPROFILE || os.homedir();
   const claudeHome = env.CLAUDE_CONFIG_DIR || path.join(home, '.claude');
+  const projects = path.join(claudeHome, 'projects');
+  const encode = (folder) => folder.replace(/[^A-Za-z0-9]/g, '-');
   const [main, ...worktrees] = checkouts(location);
-  const folders = [
+  const known = [
     { folder: main, kind: 'repository' },
     ...worktrees.map((folder) => ({ folder, kind: 'worktree' })),
-    ...ancestors(main, home).map((folder) => ({ folder, kind: 'ancestor' })),
+  ];
+  // The encoding is lossy, so a sibling such as repo-old matches too: harmless, since
+  // nothing outside the repository survives the cwd filter.
+  let below = [];
+  try {
+    const prefixes = known.map(({ folder }) => `${encode(folder)}-`);
+    const taken = new Set(known.map(({ folder }) => encode(folder)));
+    below = fs.readdirSync(projects, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && !taken.has(entry.name) && prefixes.some((prefix) => entry.name.startsWith(prefix)))
+      .map((entry) => entry.name).sort((a, b) => a.localeCompare(b));
+  } catch {
+    // No projects folder: nothing below either.
+  }
+  const folders = [
+    ...known.map(({ folder, kind }) => ({ name: encode(folder), folder, kind })),
+    ...below.map((name) => ({ name, folder: null, kind: 'subfolder' })),
+    ...ancestors(main, home).map((folder) => ({ name: encode(folder), folder, kind: 'ancestor' })),
   ];
   const found = [];
-  for (const { folder, kind } of folders) {
-    const dir = path.join(claudeHome, 'projects', folder.replace(/[^A-Za-z0-9]/g, '-'));
+  const listed = new Set();
+  for (const { name, folder, kind } of folders) {
+    if (listed.has(name)) continue;
+    listed.add(name);
+    const dir = path.join(projects, name);
     let names;
     try {
       names = fs.readdirSync(dir, { withFileTypes: true });
