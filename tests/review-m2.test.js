@@ -82,9 +82,11 @@ test('C1: a publish never reverts newer files from another clone, in docs or raw
 
 // C2
 async function pushTeamConfig(dir, change) {
-  const ref = readRef(dir, DOCS_REF);
+  // Teammates publish too: build on the remote tip, as a person editing the branch would.
+  git(dir, 'fetch', '-q', 'origin', `+${DOCS_REF}:refs/remotes/origin/product-decisions/docs`);
+  const ref = readRef(dir, 'refs/remotes/origin/product-decisions/docs');
   const current = JSON.parse(readBlob(dir, readTreeFiles(dir, ref).get('config.json')).toString());
-  commitFiles({ cwd: dir, storeDir: path.join(common(dir), 'product-decisions'), ref: DOCS_REF, parents: [ref], base: ref, files: { 'config.json': Buffer.from(JSON.stringify({ ...current, ...change })) }, message: 'edit', authorName: 'x' });
+  commitFiles({ cwd: dir, storeDir: path.join(common(dir), 'product-decisions'), ref: DOCS_REF, parents: [ref], base: ref, expected: readRef(dir, DOCS_REF), files: { 'config.json': Buffer.from(JSON.stringify({ ...current, ...change })) }, message: 'edit', authorName: 'x' });
   git(dir, 'push', '-q', 'origin', DOCS_REF);
 }
 
