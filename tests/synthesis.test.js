@@ -265,3 +265,22 @@ test('auto picks codex for a Codex session and claude for a Claude Code session,
   assert.match(fs.readFileSync(logs.codex, 'utf8'), /codex ask/);
   assert.ok(!fs.readFileSync(logs.claude, 'utf8').includes('codex ask'));
 });
+
+test('imported ranges are synthesized only on an explicit run', async (t) => {
+  const root = setup(t);
+  const claudeHome = path.join(path.dirname(root), 'claude-home');
+  const dir = path.join(claudeHome, 'projects', root.replace(/[^A-Za-z0-9]/g, '-'));
+  fs.mkdirSync(dir, { recursive: true });
+  const fixtureText = fs.readFileSync(path.join(__dirname, 'fixtures', 'claude-code', 'transcript-import.jsonl'), 'utf8');
+  fs.writeFileSync(path.join(dir, 'imported-1.jsonl'), fixtureText.split('/home/user/project').join(root));
+  const imported = runCli(['import'], { cwd: root, env: { CLAUDE_CONFIG_DIR: claudeHome } });
+  assert.equal(imported.status, 0, imported.stderr);
+
+  const engine = fakeEngine();
+  const auto = await runSynthesis({ commonDir: common(root), engine });
+  assert.equal(engine.calls.length, 0, 'automatic synthesis leaves imported sessions alone');
+  assert.equal(auto.runs, 0);
+  const forced = await runSynthesis({ commonDir: common(root), engine, force: true });
+  assert.equal(forced.runs, 1);
+  assert.equal(engine.calls.length, 1);
+});

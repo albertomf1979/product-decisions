@@ -51,6 +51,10 @@ function sessionData(events, { machine }) {
     for (const file of event.payload.files || []) files.set(file.path, file);
   }
   const name = baseName(events, machine);
+  // An imported session has no end event: it ends at its last record from the transcript.
+  const marker = events.find((e) => e.event_type === 'import' && e.payload);
+  const imported = marker ? { at: marker.payload.imported_at ?? null, importer_version: marker.payload.importer_version ?? null } : null;
+  const lastImported = [...captured].reverse().find((e) => e.origin === 'imported' && e.event_type !== 'import');
   return {
     schema_version: 1,
     tool: events[0].tool,
@@ -58,7 +62,8 @@ function sessionData(events, { machine }) {
     machine,
     file: `timeline/${name}.md`,
     started: (captured[0] || events[0]).timestamp,
-    ended: end ? end.timestamp : null,
+    ended: end ? end.timestamp : imported && lastImported ? lastImported.timestamp : null,
+    imported,
     actors: unique(captured.filter((e) => e.actor && e.actor.type !== 'plugin').map((e) => `${e.actor.type}:${e.actor.name}`))
       .map((pair) => ({ type: pair.split(':')[0], name: pair.slice(pair.indexOf(':') + 1) })),
     models: unique([...events.map((e) => e.model), ...events.filter((e) => e.event_type === 'model_usage').map((e) => e.payload.model)]),
@@ -93,6 +98,7 @@ function lineFor(event, lang) {
     case 'file_changes': return t(lang, 'file_changes', { count: (p.files || []).length });
     case 'commit_linked': return t(lang, 'commit', { sha: String(p.sha).slice(0, 7), subject: excerpt(p.subject, 120) });
     case 'consent': return t(lang, 'consent');
+    case 'import': return t(lang, 'import', { count: p.events });
     default: return excerpt(event.summary);
   }
 }
@@ -112,6 +118,7 @@ function renderMarkdown(events, data, config, gaps) {
     '',
   ];
   if (data.partial) out.push(`> ${t(lang, 'partial')}`, '');
+  if (data.imported) out.push(`> ${t(lang, 'imported_note', { date: String(data.imported.at).slice(0, 10) })}`, '');
 
   // A model shows when it changes, not on every model request (Codex reports each one).
   let shownModel = null;
@@ -142,7 +149,7 @@ function renderMarkdown(events, data, config, gaps) {
   if (data.commits.length > 0) {
     out.push(`## ${t(lang, 'commits')}`, '', ...data.commits.map((c) => `- \`${String(c.sha).slice(0, 7)}\` ${excerpt(c.subject, 120)}`), '');
   }
-  out.push(`## ${t(lang, 'coverage_title')}`, '', coverageNote(lang, data.tool), '');
+  out.push(`## ${t(lang, 'coverage_title')}`, '', coverageNote(lang, data.imported ? 'imported' : data.tool), '');
   return `${out.join('\n')}`;
 }
 

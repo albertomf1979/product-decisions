@@ -330,3 +330,38 @@ test('each consent text appears once per version, with the generated header', ()
 test('without consent records the README has no consent section', () => {
   assert.ok(!/## Consent/.test(renderIndexes([], [], DEFAULT_CONFIG).get('README.md')));
 });
+
+function importedSession() {
+  n = 0;
+  const session = 'imp-12345678';
+  return [
+    ev('user_prompt', { actorType: 'user', origin: 'imported', payload: { prompt: 'Add a scope section', imported: true }, session }),
+    ev('agent_response', { origin: 'imported', payload: { last_assistant_message: 'Added.', imported: true }, session }),
+    ev('import', { actorType: 'user', origin: 'imported', payload: { importer_version: 1, transcript: '~/.claude/projects/x/imp.jsonl', records_read: 4, events: 2, skipped: {}, imported_at: '2026-11-08T12:00:00.000+01:00' }, session }),
+    ev('seal', { actorType: 'plugin', origin: 'derived', payload: {}, session }),
+  ];
+}
+
+test('an imported session says so, and that its seals only prove the state since import', () => {
+  const text = chronicle(importedSession(), DEFAULT_CONFIG, { machine: 'abcd1234' });
+  assert.match(text, /Imported on 2026-11-08 from the transcript\. The seals prove only the state since the import, not what happened at the time\. File changes and commits were not reconstructed\./);
+  const es = chronicle(importedSession(), { ...DEFAULT_CONFIG, language: 'es' }, { machine: 'abcd1234' });
+  assert.match(es, /Importada el 2026-11-08 desde la transcripción\. Los sellos solo prueban el estado desde la importación, no lo que pasó entonces\. No se reconstruyeron los cambios de ficheros ni los commits\./);
+  const data = sessionData(importedSession(), { machine: 'abcd1234' });
+  assert.deepEqual(data.imported, { at: '2026-11-08T12:00:00.000+01:00', importer_version: 1 });
+  assert.equal(sessionData(fullSession(), { machine: 'abcd1234' }).imported, null);
+  assert.doesNotMatch(chronicle(fullSession()), /Imported on/);
+});
+
+test('an imported session ends at its last imported event, not "still open"', () => {
+  const events = importedSession();
+  const data = sessionData(events, { machine: 'abcd1234' });
+  assert.equal(data.ended, events[1].timestamp);
+  assert.doesNotMatch(chronicle(events, DEFAULT_CONFIG, { machine: 'abcd1234' }), /Still open/);
+});
+
+test('an imported session names what an import cannot observe', () => {
+  const text = chronicle(importedSession(), DEFAULT_CONFIG, { machine: 'abcd1234' });
+  assert.match(text, /Imported from the transcript, not observed by hooks:/);
+  assert.equal(tr('es', 'coverage_imported') !== 'coverage_imported', true);
+});

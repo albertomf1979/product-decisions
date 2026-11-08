@@ -79,7 +79,7 @@ function toolStats(store) {
     return tools;
   }
   for (const tool of toolDirs.filter((name) => name !== 'cli')) {
-    const stats = { sessions: 0, events: 0, derived: 0, last_event_at: null };
+    const stats = { sessions: 0, events: 0, derived: 0, imported: 0, last_event_at: null };
     for (const file of walk(path.join(rawDir, tool))) {
       stats.sessions += 1;
       eachLine(file, (line) => {
@@ -91,6 +91,7 @@ function toolStats(store) {
           return;
         }
         stats.events += 1;
+        if (event.origin === 'imported') stats.imported += 1;
         const at = event.timestamp;
         // Compared as instants, because timestamps can carry different offsets.
         if (at && (!stats.last_event_at || new Date(at) > new Date(stats.last_event_at))) stats.last_event_at = at;
@@ -239,7 +240,7 @@ function render(status) {
   const tools = Object.entries(status.tools);
   if (tools.length === 0) lines.push('Captured: nothing yet. Start a new session.');
   for (const [tool, stats] of tools) {
-    lines.push(`${tool}: ${stats.sessions} sessions, ${stats.events} captured events (+${stats.derived} added), last at ${stats.last_event_at}`);
+    lines.push(`${tool}: ${stats.sessions} sessions, ${stats.events} captured events (+${stats.derived} added${stats.imported ? `, ${stats.imported} imported` : ''}), last at ${stats.last_event_at}`);
   }
   const pub = status.publication;
   if (!pub.remote) {

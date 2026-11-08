@@ -105,7 +105,9 @@ function closedRanges(commonDir, state, llmState, now = new Date()) {
     const start = cursor ? events.findIndex((e) => e.event_id === cursor) + 1 : 0;
     const range = events.slice(start, end + 1);
     if (range.length === 0) continue;
-    out.push({ tool, sessionId, file, key, events, range, through, worth: isWorthARun(range) });
+    // An imported session has no hook event: it waits for an explicit run (M5).
+    const imported = !events.some((e) => e.origin === 'hook');
+    out.push({ tool, sessionId, file, key, events, range, through, worth: isWorthARun(range), imported });
   }
   return out;
 }
@@ -239,6 +241,8 @@ async function runSynthesis({ commonDir, force = false, now = new Date(), engine
     // codex exec cannot run without tools, and that is unverified: never automatically,
     // only on an explicit sync --llm.
     if (!force && engineFor(r.tool, caps.engine) === 'codex') continue;
+    // A backlog of imported sessions must not spend the daily quota behind the person's back.
+    if (!force && r.imported) continue;
     const header = promptHeader({ session: r.sessionId, tool: r.tool, language: lang, decisions: existing, maxChars: caps.max_input_chars });
     const chunks = buildChunks(r.range, { maxChars: caps.max_input_chars, header });
     if (!force && llm.failed[r.key] && llm.failed[r.key].from === chunks[0].from) continue;

@@ -637,3 +637,19 @@ test('init explains the Codex hook review', (t) => {
   const { root } = repo(t);
   assert.match(init(root).stdout, /Using Codex\? Review this plugin's hooks once in \/hooks \(and again after each update\), or nothing is captured\. Codex support, including native Windows, is pending review\./);
 });
+
+test('status counts imported events per tool', (t) => {
+  const { root, base } = repo(t);
+  init(root);
+  const claudeHome = path.join(base, 'claude-home');
+  const dir = path.join(claudeHome, 'projects', root.replace(/[^A-Za-z0-9]/g, '-'));
+  fs.mkdirSync(dir, { recursive: true });
+  const text = fs.readFileSync(path.join(__dirname, 'fixtures', 'claude-code', 'transcript-import.jsonl'), 'utf8');
+  fs.writeFileSync(path.join(dir, 'imported-1.jsonl'), text.split('/home/user/project').join(root));
+  assert.equal(runCli(['import'], { cwd: root, env: { CLAUDE_CONFIG_DIR: claudeHome } }).status, 0);
+  hook(root, 'UserPromptSubmit.json');
+  const { stdout } = runCli(['status'], { cwd: root });
+  assert.match(stdout, /claude-code: 2 sessions, 12 captured events \(\+\d+ added, 11 imported\)/);
+  const json = JSON.parse(runCli(['status', '--json'], { cwd: root }).stdout);
+  assert.equal(json.tools['claude-code'].imported, 11);
+});
