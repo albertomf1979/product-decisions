@@ -97,3 +97,28 @@ test('damaged decision or note data is skipped, not fatal', async (t) => {
   assert.ok(readme.includes('ADR-20261105-aaaaaa'));
   assert.ok(!readme.includes('ADR-20261105-eeeeee'));
 });
+
+test("two people's consent records both reach the merged README", async (t) => {
+  const { root, remote, clone } = team(t);
+  const ben = clone('ben');
+  await publish({ commonDir: common(root), visibilityOf: vis('private') });
+  await publish({ commonDir: common(ben), visibilityOf: vis('private') });
+  await publish({ commonDir: common(root), visibilityOf: vis('private') });
+  const readme = blobAt(remote, 'README.md');
+  assert.match(readme, /## Consent/);
+  assert.ok(readme.includes('Test Person') && readme.includes('ben'));
+  assert.ok([...docs(remote).keys()].some((f) => /^consent\/[0-9a-f]{8}\.md$/.test(f)));
+  assert.ok([...docs(remote).keys()].filter((f) => f.startsWith('.data/consents/')).length === 2);
+});
+
+test('damaged consent data is skipped', async (t) => {
+  const { root, remote } = team(t);
+  const overlay = overlayDir(common(root));
+  fs.mkdirSync(path.join(overlay, '.data', 'consents'), { recursive: true });
+  fs.writeFileSync(path.join(overlay, '.data', 'consents', 'ffffffff.json'), '{ broken');
+  fs.writeFileSync(path.join(overlay, '.data', 'consents', 'eeeeeeee.json'), JSON.stringify({ schema_version: 1, machine: 'eeeeeeee', records: [{ at: 'x', actor: 'MALLORY', version: '../../x', method: 'flag' }], texts: {} }));
+  await publish({ commonDir: common(root), visibilityOf: vis('private') });
+  const readme = blobAt(remote, 'README.md');
+  assert.match(readme, /Test Person/);
+  assert.ok(!readme.includes('MALLORY'));
+});

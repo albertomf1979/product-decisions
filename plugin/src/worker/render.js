@@ -88,6 +88,29 @@ function isNoteData(d) {
     && isSafeFile(d.session_file, 'timeline/') && Array.isArray(d.evidence) && d.evidence.every(isText);
 }
 
+const VERSION = /^[0-9a-f]{8}$/;
+
+function isConsentData(d) {
+  return Boolean(d) && d.schema_version === 1 && isText(d.machine)
+    && isList(d.records, (r) => isText(r.at) && isText(r.actor) && isText(r.version) && VERSION.test(r.version) && ['flag', 'interactive'].includes(r.method))
+    && Boolean(d.texts) && typeof d.texts === 'object' && !Array.isArray(d.texts)
+    && Object.entries(d.texts).every(([v, text]) => VERSION.test(v) && isText(text));
+}
+
+/** This machine's consent acceptances, from its own CLI record. */
+function ownConsents(commonDir, machine) {
+  const file = path.join(storeDir(commonDir), 'raw', 'cli', `local-${machine}.jsonl`);
+  if (!fs.existsSync(file)) return null;
+  const records = [];
+  const texts = {};
+  for (const e of readEvents(file).filter((x) => x.event_type === 'consent' && x.payload && isText(x.payload.statement))) {
+    const version = require('node:crypto').createHash('sha256').update(e.payload.statement).digest('hex').slice(0, 8);
+    records.push({ at: e.timestamp, actor: (e.actor && e.actor.name) || 'unknown', version, method: e.payload.method === 'interactive' ? 'interactive' : 'flag' });
+    texts[version] = e.payload.statement;
+  }
+  return records.length ? { schema_version: 1, machine, records, texts } : null;
+}
+
 function isDocumentChange(d) {
   return Boolean(d) && isText(d.at) && isText(d.path) && isText(d.actor) && isText(d.file) && d.file.startsWith('01-definition/');
 }
@@ -110,6 +133,8 @@ function buildDocsFiles({ location, commonDir, state, config, bases = [] }) {
   }
   // Create-once files (document change records, ADRs, phase notes) are added only when
   // the branch lacks them: a person's edit on the docs branch is never overwritten.
+  const consents = ownConsents(commonDir, state.machine);
+  if (consents) files.set(`.data/consents/${state.machine}.json`, Buffer.from(`${JSON.stringify(consents, null, 2)}\n`));
   const overlay = overlayDir(commonDir);
   for (const full of walk(overlay)) {
     const rel = path.relative(overlay, full).split(path.sep).join('/');
@@ -120,6 +145,7 @@ function buildDocsFiles({ location, commonDir, state, config, bases = [] }) {
   const documentChanges = [];
   const decisions = [];
   const notes = [];
+  const consentData = [];
   for (const [file, content] of files) {
     try {
       const data = file.startsWith('.data/') ? JSON.parse(content.toString('utf8')) : null;
@@ -127,11 +153,12 @@ function buildDocsFiles({ location, commonDir, state, config, bases = [] }) {
       if (file.startsWith('.data/documents/') && isDocumentChange(data)) documentChanges.push(data);
       if (file.startsWith('.data/decisions/') && isDecisionData(data)) decisions.push(data);
       if (file.startsWith('.data/phases/') && isNoteData(data)) notes.push(data);
+      if (file.startsWith('.data/consents/') && isConsentData(data)) consentData.push(data);
     } catch {
       // A damaged data file is skipped, not fatal.
     }
   }
-  for (const [file, content] of renderIndexes(sessions, documentChanges, config, { decisions, notes })) files.set(file, Buffer.from(content));
+  for (const [file, content] of renderIndexes(sessions, documentChanges, config, { decisions, notes, consents: consentData })) files.set(file, Buffer.from(content));
   return files;
 }
 
@@ -148,4 +175,4 @@ function refreshFolder({ commonDir }) {
   return files;
 }
 
-module.exports = { buildDocsFiles, refreshFolder, ownSessions, overlayDir, walk, gapsOf, isSessionData, isDecisionData, isNoteData };
+module.exports = { buildDocsFiles, refreshFolder, ownSessions, overlayDir, walk, gapsOf, isSessionData, isDecisionData, isNoteData, isConsentData };
