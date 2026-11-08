@@ -21,15 +21,27 @@ const oneLine = (text) => String(text).replace(/\s+/g, ' ').trim().slice(0, 120)
  * The part shared by every chunk of a range: session, language, and the existing
  * decisions the model may link to.
  *
- * @param {{ session: string, tool: string, language: string, decisions: Array<{ id: string, title: string, at: string }> }} options
+ * The list stops at a quarter of `maxChars`, so it never crowds out the events.
+ *
+ * @param {{ session: string, tool: string, language: string, decisions: Array<{ id: string, title: string, at: string }>, maxChars?: number }} options
  */
-function promptHeader({ session, tool, language, decisions }) {
+function promptHeader({ session, tool, language, decisions, maxChars = Infinity }) {
   const listed = [...decisions]
     .sort((a, b) => (a.at === b.at ? (a.id < b.id ? 1 : -1) : (Date.parse(a.at) < Date.parse(b.at) ? 1 : -1)))
     .slice(0, MAX_LISTED);
   const lines = [`Session ${session} (${tool}). Write in ${LANGUAGES[language] || LANGUAGES.en}.`, ''];
   if (listed.length === 0) lines.push('Existing decisions: none.');
-  else lines.push('Existing decisions (newest first), for related and supersedes:', ...listed.map((d) => `- ${d.id}: ${oneLine(d.title)}`));
+  else {
+    lines.push('Existing decisions (newest first), for related and supersedes:');
+    const room = Math.floor(maxChars / 4);
+    let size = lines.join('\n').length;
+    for (const d of listed) {
+      const line = `- ${d.id}: ${oneLine(d.title)}`;
+      if (size + line.length + 1 > room) break;
+      lines.push(line);
+      size += line.length + 1;
+    }
+  }
   return lines.join('\n');
 }
 

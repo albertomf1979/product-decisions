@@ -28,7 +28,7 @@ function addEvents(root, sessionId, list) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const events = list.map(([eventType, payload, actorType]) => buildEvent(
     { eventType, actorType, llmName: 'claude', agent: { name: 'main' }, payload },
-    { tool: 'claude-code', sessionId, actorName: 'Test Person', git: null, sources: [], summary: eventType, now: new Date(Date.parse('2026-11-08T09:00:00Z') + (tick += 1000)) },
+    { tool: 'claude-code', sessionId, actorName: 'Test Person', git: null, sources: [], summary: eventType, now: new Date(Date.now() - 600000 + (tick += 1000)) },
   ));
   fs.appendFileSync(file, events.map((e) => `${JSON.stringify(e)}\n`).join(''));
   return events;

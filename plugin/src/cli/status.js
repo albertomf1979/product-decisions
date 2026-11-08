@@ -243,7 +243,8 @@ function render(status) {
     const l = status.llm;
     const mode = !l.project_enabled ? 'off for this project' : !l.person_enabled ? 'off for you' : 'on';
     const error = l.last_error ? `, last error: ${l.last_error.reason} at ${l.last_error.at}` : '';
-    lines.push(`LLM synthesis: ${mode}, model ${l.model}, ${l.runs_today} of ${l.max_runs_per_day} runs today, ${l.pending_sessions} sessions pending${error}`);
+    const raised = l.caps_raised ? ' (the project asks for more; capped at the consented values)' : '';
+    lines.push(`LLM synthesis: ${mode}, model ${l.model}, ${l.runs_today} of ${l.max_runs_per_day} runs today${raised}, ${l.pending_sessions} sessions pending${error}`);
   }
   lines.push(`Seals: ${status.seals.sessions} sessions, ${status.seals.unsealed_events} events not sealed yet, ${status.seals.problems} problems`);
   lines.push(`Stored: ${(status.store.bytes / 1024).toFixed(1)} KiB on this machine`);

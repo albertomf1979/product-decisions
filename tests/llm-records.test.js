@@ -76,8 +76,9 @@ test('sources are listed from the evidence events, not from the model', () => {
 test('prose cannot add headings, HTML, or remote images, and is redacted', () => {
   const out = sanitizeProse(`# Fake\n<img src=x>![t](https://evil.example/p?q=1) /Users/someone/x sk-ant-api03-${'a'.repeat(90)}`, { extra: [], home: '/Users/someone' });
   assert.ok(!/^#/m.test(out));
-  assert.ok(!out.includes('<img'));
-  assert.ok(!out.includes('!['));
+  // Neutralised by escaping, not removed: nesting cannot rebuild them.
+  assert.ok(!/(^|[^\\])<img/.test(out));
+  assert.ok(!/(^|[^\\])!\[/.test(out));
   assert.ok(!out.includes('/Users/someone'));
   assert.ok(!out.includes('sk-ant-api03'));
 });

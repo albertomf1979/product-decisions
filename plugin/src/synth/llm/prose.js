@@ -4,14 +4,20 @@ const { redactString } = require('../../core/redact.js');
 
 /**
  * Model text made safe for a Markdown file anyone can read: redacted like the record,
- * no HTML, no remote images (which a prompt injection could use to send data out), and
- * no line that could pose as one of the template's headings.
+ * and neutralised character by character rather than parsed, so nesting cannot rebuild
+ * what was removed. No HTML, comments, or autolinks (every `<` is escaped), no images
+ * (which a prompt injection could use to send data out: every `![` is escaped, and
+ * reference definitions are broken), and no line that could pose as a heading of the
+ * template (ATX or setext).
  */
 function sanitizeProse(text, { extra = [], home = null } = {}) {
   return redactString(String(text ?? ''), extra, home)
     .replace(/\r\n?/g, '\n')
-    .replace(/<\/?[A-Za-z][^>]*>/g, '')
-    .replace(/!\[([^\]]*)\]\(([^)]*)\)/g, '$1 ($2)')
+    .replace(/\\/g, '\\\\')
+    .replace(/</g, '\\<')
+    .replace(/!\[/g, '\\![')
+    .replace(/^(\s{0,3})\[([^\]\n]*)\]:/gm, '$1\\[$2]:')
+    .replace(/^(\s{0,3})(=+|-+)(\s*)$/gm, '$1\\$2$3')
     .replace(/^(\s*)#/gm, '$1\\#')
     .replace(/\n{3,}/g, '\n\n')
     .trim();

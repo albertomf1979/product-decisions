@@ -8,6 +8,7 @@
 const path = require('node:path');
 
 const NO_CLAUDE = path.join(__dirname, 'no-claude-in-tests');
-if (!process.env.PRODUCT_DECISIONS_CLAUDE_BIN) process.env.PRODUCT_DECISIONS_CLAUDE_BIN = NO_CLAUDE;
+// Unconditional: a developer may have exported the real path, as sync --llm advises.
+process.env.PRODUCT_DECISIONS_CLAUDE_BIN = NO_CLAUDE;
 
 module.exports = { NO_CLAUDE };

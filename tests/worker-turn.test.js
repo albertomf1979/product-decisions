@@ -16,6 +16,23 @@ const { runHook, assertSilent, fixture, capturedEvents } = require('./helpers/ho
 
 const TRANSCRIPT = path.join(__dirname, 'fixtures', 'claude-code', 'transcript-sample.jsonl');
 const ENRICH = path.join(__dirname, 'fixtures', 'claude-code', 'transcript-enrich.jsonl');
+/**
+ * The enrichment fixture as this test repository's own transcript: its folder, and times
+ * after the seeded event, since anything else is not this session's (PRD ACT-5, CAP-14).
+ */
+function localEnrich(root) {
+  const target = path.join(root, '..', 'enrich-local.jsonl');
+  const start = Date.now() + 60000;
+  const lines = fs.readFileSync(ENRICH, 'utf8').trim().split('\n').map((line, i) => {
+    const record = JSON.parse(line);
+    if (record.cwd) record.cwd = root;
+    if (record.timestamp) record.timestamp = new Date(start + i * 1000).toISOString();
+    return JSON.stringify(record);
+  });
+  fs.writeFileSync(target, `${lines.join('\n')}\n`);
+  fs.cpSync(ENRICH.replace(/\.jsonl$/, ''), target.replace(/\.jsonl$/, ''), { recursive: true });
+  return target;
+}
 
 function setup(t, options) {
   const repo = makeRepo(options);
@@ -309,13 +326,15 @@ test('runTurn adds intermediate text once, even when run twice', async (t) => {
   const root = setup(t);
   seed(root);
   finalResponse(root, 'Done: the scope section is at the end of the PRD.');
-  await runTurn(job(root, { transcriptPath: ENRICH }), { commonDir: common(root) });
+  const transcript = localEnrich(root);
+  await runTurn(job(root, { transcriptPath: transcript }), { commonDir: common(root) });
   fs.rmSync(path.join(common(root), 'product-decisions', 'sessions'), { recursive: true, force: true });
-  await runTurn(job(root, { transcriptPath: ENRICH }), { commonDir: common(root) });
+  await runTurn(job(root, { transcriptPath: transcript }), { commonDir: common(root) });
   const intermediate = ofType(root, 'agent_response').filter((e) => e.payload.intermediate);
   assert.equal(intermediate.length, 2);
   assert.ok(intermediate.every((e) => e.origin === 'derived' && e.actor.type === 'llm'));
-  assert.equal(intermediate[0].timestamp.slice(0, 10), '2026-11-08');
+  // Rebuilt events carry the transcript's time, which localEnrich sets a minute ahead.
+  assert.ok(Date.parse(intermediate[0].timestamp) > Date.now());
   assert.equal(ofType(root, 'tool_denied').length, 1);
   assert.deepEqual(verifyFile(file(root)).problems, []);
 });
@@ -335,7 +354,7 @@ test('a close job records closed_through and one model_usage per model with toke
   const root = setup(t);
   seed(root);
   const last = finalResponse(root, 'Done: the scope section is at the end of the PRD.');
-  await runTurn(job(root, { kind: 'close', transcriptPath: ENRICH }), { commonDir: common(root) });
+  await runTurn(job(root, { kind: 'close', transcriptPath: localEnrich(root) }), { commonDir: common(root) });
   assert.equal(readSessionMeta(common(root), 'claude-code', 's1').closed_through, last.event_id);
   const totals = ofType(root, 'model_usage').filter((e) => e.payload.usage);
   assert.deepEqual(totals.map((e) => [e.payload.model, e.payload.usage]), [

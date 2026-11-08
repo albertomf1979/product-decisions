@@ -35,10 +35,31 @@ const lastOf = (events, type) => {
   return null;
 };
 
-/** A session that ended and was processed after its end: nothing may be added to it. */
+const isCaptured = (e) => e.origin !== 'derived' && e.event_type !== 'seal';
+
+/**
+ * A session whose last end was processed, with nothing captured after it: nothing may be
+ * added to it. A resumed session captures again after its end, so it is not finished.
+ */
 function isFinished(events) {
-  const end = events.findIndex((e) => e.event_type === 'session_end');
-  return end >= 0 && events.slice(end + 1).some((e) => e.event_type === 'seal');
+  let end = -1;
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    if (events[i].event_type === 'session_end') {
+      end = i;
+      break;
+    }
+  }
+  if (end < 0) return false;
+  const after = events.slice(end + 1);
+  return after.some((e) => e.event_type === 'seal') && !after.some(isCaptured);
+}
+
+/** The events since the last end that has captured events after it: a resumed part starts there. */
+function currentPart(events) {
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    if (events[i].event_type === 'session_end' && events.slice(i + 1).some(isCaptured)) return events.slice(i + 1);
+  }
+  return events;
 }
 
 /** The last event the tool itself reported: work after it is not this session's. */
@@ -57,7 +78,8 @@ async function runTurn(job, { commonDir, now = new Date() }) {
 
   const events = readEvents(file);
   if (isFinished(events)) return;
-  const extra = compileExtra(state.redact_patterns);
+  // Personal and project patterns, as on the capture path.
+  const extra = compileExtra([...(state.redact_patterns || []), ...(require('../core/config.js').readConfig(commonDir).redact_patterns || [])]);
   const home = os.homedir();
   // Git runs only in the repository this store belongs to: a session that moved into
   // another repository gets no snapshot, commits, or document checks from it.
@@ -82,7 +104,8 @@ async function runTurn(job, { commonDir, now = new Date() }) {
     if (changes) derive('file_changes', changes, `${changes.files.length} files changed`);
 
     const linked = new Set(events.filter((e) => e.event_type === 'commit_linked').map((e) => e.payload.sha));
-    const startHead = events.find((e) => e.git && e.git.head)?.git.head;
+    // A resumed part starts from its own HEAD: commits made while the session was closed are not its.
+    const startHead = (currentPart(events).find((e) => isCaptured(e) && e.git && e.git.head) || events.find((e) => e.git && e.git.head))?.git.head;
     const since = resolveCommit(location.worktreeRoot, startHead);
     const until = lastCaptured(events)?.timestamp || null;
     for (const commit of newCommits({ worktreeRoot: location.worktreeRoot, sinceHead: since, until })) {
@@ -104,7 +127,8 @@ async function runTurn(job, { commonDir, now = new Date() }) {
   }
 
   if (job.transcriptPath) {
-    enrichFromTranscript({ job, commonDir, file, events: readEvents(file), state, extra, home, git });
+    const roots = [locateStore(commonDir, state)?.mainRoot, location && location.worktreeRoot].filter(Boolean);
+    enrichFromTranscript({ job, commonDir, file, events: readEvents(file), state, extra, home, git, roots });
   }
   if (job.kind === 'close') {
     const through = lastCaptured(events);
@@ -138,7 +162,7 @@ function appendDerived(file, { eventType, actorType, agent, payload, summary }, 
  * a person, token totals, and subagent models. Hooks stay the source of truth, and
  * every derived payload is redacted like a captured one.
  */
-function enrichFromTranscript({ job, commonDir, file, events, state, extra, home, git }) {
+function enrichFromTranscript({ job, commonDir, file, events, state, extra, home, git, roots }) {
   const meta = readSessionMeta(commonDir, job.tool, job.sessionId) || {};
   let offset = Number.isInteger(meta.transcript_offset) ? meta.transcript_offset : 0;
   try {
@@ -146,11 +170,14 @@ function enrichFromTranscript({ job, commonDir, file, events, state, extra, home
   } catch {
     return;
   }
-  const { records, nextOffset } = readTranscriptSince(job.transcriptPath, offset);
+  const read = readTranscriptSince(job.transcriptPath, offset);
+  const records = capturable(read.records, { events, gaps: require('./render.js').gapsOf(commonDir, state.machine), roots });
+  const { nextOffset } = read;
   const seenUuids = new Set(events.map((e) => e.payload && e.payload.transcript_uuid).filter(Boolean));
   const capturedTexts = new Set(events.filter((e) => e.event_type === 'agent_response' && e.origin !== 'derived')
     .map((e) => e.payload && e.payload.last_assistant_message).filter((x) => typeof x === 'string'));
-  for (const found of transcriptEvents(records, { capturedTexts, seenUuids })) {
+  const normalize = (text) => redactString(text, extra, home);
+  for (const found of transcriptEvents(records, { capturedTexts, seenUuids, normalize })) {
     const at = found.at && !Number.isNaN(Date.parse(found.at)) ? new Date(found.at) : new Date();
     appendDerived(file, { ...found, payload: redactValue(found.payload, extra, home), summary: redactString(found.summary, extra, home) },
       { job, actorName: found.actorType === 'user' ? state.actor_name : null, git, now: at });
@@ -170,6 +197,28 @@ function enrichFromTranscript({ job, commonDir, file, events, state, extra, home
   writeSessionMeta(commonDir, job.tool, job.sessionId, {
     ...(readSessionMeta(commonDir, job.tool, job.sessionId) || {}),
     transcript_offset: nextOffset, token_totals: totals, token_last_ids: [...counted].slice(-50),
+  });
+}
+
+const within = (root, target) => {
+  const rel = path.relative(path.resolve(root), path.resolve(target));
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+};
+
+/**
+ * Only what capture itself would have recorded: nothing from before this session's first
+ * captured event here (before activation, or before it reached this repository), nothing
+ * written while capture was paused, and nothing done in another folder (PRD ACT-5, CAP-14).
+ */
+function capturable(records, { events, gaps, roots }) {
+  const first = events.find(isCaptured);
+  const start = first ? Date.parse(first.timestamp) : Infinity;
+  const paused = gaps.map((g) => [Date.parse(g.from), Date.parse(g.to)]);
+  return records.filter((record) => {
+    const at = Date.parse(record.timestamp);
+    if (!Number.isFinite(at) || at < start) return false;
+    if (paused.some(([from, to]) => at >= from && at <= to)) return false;
+    return typeof record.cwd !== 'string' || roots.some((root) => within(root, record.cwd));
   });
 }
 
@@ -214,4 +263,4 @@ async function recoverSessions({ commonDir }) {
   return jobs;
 }
 
-module.exports = { runTurn, recoverSessions };
+module.exports = { runTurn, recoverSessions, isFinished };

@@ -98,7 +98,7 @@ const oneLine = (text, max) => {
  *
  * @returns {Array<{ eventType: string, actorType: string, agent: object, payload: object, summary: string, at: string }>}
  */
-function transcriptEvents(records, { capturedTexts = new Set(), seenUuids = new Set() } = {}) {
+function transcriptEvents(records, { capturedTexts = new Set(), seenUuids = new Set(), normalize = (x) => x } = {}) {
   const captured = new Set([...capturedTexts].map((x) => String(x).trim()));
   const out = [];
   for (const record of records) {
@@ -108,7 +108,8 @@ function transcriptEvents(records, { capturedTexts = new Set(), seenUuids = new 
       for (const block of blocksOf(record)) {
         if (!block || block.type !== 'text' || typeof block.text !== 'string') continue;
         const text = block.text.trim();
-        if (!text || captured.has(text)) continue;
+        // Captured texts are redacted, so compare the redacted form too.
+        if (!text || captured.has(text) || captured.has(normalize(text).trim())) continue;
         const uuid = keyOf(record, text);
         if (seenUuids.has(uuid)) continue;
         out.push({

@@ -8,7 +8,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { readLocal, storeDir } = require('../core/state.js');
-const { readConfig } = require('../core/config.js');
+const { readConfig, DEFAULT_CONFIG } = require('../core/config.js');
 const { consentIsCurrent } = require('../core/consent.js');
 const { locateStore } = require('../core/locate.js');
 const { readSessionMeta } = require('../core/store.js');
@@ -25,8 +25,27 @@ const { adrFiles } = require('../synth/llm/adr.js');
 const { noteFiles } = require('../synth/llm/notes.js');
 const { resolveClaude, runClaude } = require('../synth/llm/engine.js');
 
-/** Failures that would repeat if retried as they are: only an explicit sync --llm retries them. */
-const REPEATING = new Set(['budget', 'no_output']);
+/**
+ * Failures that would repeat if retried as they are, and that may have spent quota: they
+ * stop the run, and only an explicit sync --llm retries them.
+ */
+const REPEATING = new Set(['budget', 'no_output', 'timeout']);
+
+/** A session whose last sealed turn is this old counts as closed, though its end was never seen. */
+const IDLE_MS = 6 * 3600000;
+
+/**
+ * The caps each person consented to (the consent text quotes them). A shared config can
+ * lower them but not raise them: anyone who can push the docs branch could otherwise
+ * raise everyone's spending without notice.
+ */
+const CONSENTED = Object.freeze({
+  max_runs_per_day: DEFAULT_CONFIG.llm.max_runs_per_day,
+  max_budget_usd: DEFAULT_CONFIG.llm.max_budget_usd,
+  max_input_chars: DEFAULT_CONFIG.llm.max_input_chars,
+});
+const effectiveLlm = (llm) => ({ ...llm, ...Object.fromEntries(Object.keys(CONSENTED).map((k) => [k, Math.min(llm[k], CONSENTED[k])])) });
+const capsRaised = (llm) => Object.keys(CONSENTED).some((k) => llm[k] > CONSENTED[k]);
 
 const statePath = (commonDir) => path.join(storeDir(commonDir), 'state', 'llm.json');
 const EMPTY = () => ({ schema_version: 1, day: null, runs_today: 0, cursors: {}, failed: {}, last_run_at: null, last_error: null });
@@ -58,8 +77,12 @@ function readEvents(file) {
   }).filter(Boolean);
 }
 
-/** Every session of this machine with the part a close job closed and synthesis has not processed. */
-function closedRanges(commonDir, state, llmState) {
+/**
+ * Every session of this machine with a closed part synthesis has not processed. A part is
+ * closed by a close job, by an end event that was sealed, or by hours without activity
+ * after a sealed turn (an end that never arrived, PRD CAP-5).
+ */
+function closedRanges(commonDir, state, llmState, now = new Date()) {
   const raw = path.join(storeDir(commonDir), 'raw');
   const out = [];
   for (const file of walk(raw).filter((f) => f.endsWith(`-${state.machine}.jsonl`) && path.basename(path.dirname(f)) !== 'cli').sort()) {
@@ -68,9 +91,15 @@ function closedRanges(commonDir, state, llmState) {
     const tool = path.basename(path.dirname(file));
     const sessionId = events[0].session_id;
     const key = `${tool}/${sessionId}`;
-    const through = (readSessionMeta(commonDir, tool, sessionId) || {}).closed_through;
-    const end = through ? events.findIndex((e) => e.event_id === through) : -1;
+    const marked = (readSessionMeta(commonDir, tool, sessionId) || {}).closed_through;
+    let end = marked ? events.findIndex((e) => e.event_id === marked) : -1;
+    const last = lastCapturedIndex(events);
+    if (last >= 0 && events[events.length - 1].event_type === 'seal') {
+      const quiet = now.getTime() - Date.parse(events[last].timestamp) >= IDLE_MS;
+      if (events[last].event_type === 'session_end' || quiet) end = Math.max(end, last);
+    }
     if (end < 0) continue;
+    const through = events[end].event_id;
     const cursor = llmState.cursors[key];
     const start = cursor ? events.findIndex((e) => e.event_id === cursor) + 1 : 0;
     const range = events.slice(start, end + 1);
@@ -80,11 +109,16 @@ function closedRanges(commonDir, state, llmState) {
   return out;
 }
 
+function lastCapturedIndex(events) {
+  for (let i = events.length - 1; i >= 0; i -= 1) if (events[i].origin !== 'derived' && events[i].event_type !== 'seal') return i;
+  return -1;
+}
+
 /** @returns {Array<{ tool, sessionId, file, key, from: string | null, through: string }>} Ranges worth a run that have not run. */
-function pendingSessions(commonDir) {
+function pendingSessions(commonDir, { now = new Date() } = {}) {
   const state = readLocal(commonDir);
   if (!state || !state.activated) return [];
-  return closedRanges(commonDir, state, readLlmState(commonDir)).filter((r) => r.worth)
+  return closedRanges(commonDir, state, readLlmState(commonDir), now).filter((r) => r.worth)
     .map((r) => ({ tool: r.tool, sessionId: r.sessionId, file: r.file, key: r.key, from: r.range[0].event_id, through: r.through }));
 }
 
@@ -101,8 +135,10 @@ function llmStatus(commonDir, { now = new Date() } = {}) {
     consent_current: consentIsCurrent(state),
     model: config.llm.model,
     runs_today: llm.day === today(now) ? llm.runs_today : 0,
-    max_runs_per_day: config.llm.max_runs_per_day,
-    pending_sessions: pendingSessions(commonDir).length,
+    max_runs_per_day: effectiveLlm(config.llm).max_runs_per_day,
+    max_budget_usd: effectiveLlm(config.llm).max_budget_usd,
+    caps_raised: capsRaised(config.llm),
+    pending_sessions: pendingSessions(commonDir, { now }).length,
     last_run_at: llm.last_run_at,
     last_error: llm.last_error,
   };
@@ -155,10 +191,11 @@ async function runSynthesis({ commonDir, force = false, now = new Date(), engine
   const state = readLocal(commonDir);
   if (!state || !state.activated) return result('off');
   if (!consentIsCurrent(state)) return result('no_consent');
-  const config = readConfig(commonDir);
-  const caps = config.llm;
+  const shared = readConfig(commonDir);
+  const caps = effectiveLlm(shared.llm);
+  const config = { ...shared, llm: caps };
   if (!force && (caps.enabled === false || state.llm_enabled === false || caps.max_runs_per_day === 0)) {
-    return result('off', { pending: pendingSessions(commonDir).length });
+    return result('off', { pending: pendingSessions(commonDir, { now }).length });
   }
 
   const llm = readLlmState(commonDir);
@@ -175,13 +212,13 @@ async function runSynthesis({ commonDir, force = false, now = new Date(), engine
   let stopped = null;
 
   outer:
-  for (const r of closedRanges(commonDir, state, llm)) {
+  for (const r of closedRanges(commonDir, state, llm, now)) {
     if (!r.worth) {
       llm.cursors[r.key] = r.through;
       writeLlmState(commonDir, llm);
       continue;
     }
-    const header = promptHeader({ session: r.sessionId, tool: r.tool, language: lang, decisions: existing });
+    const header = promptHeader({ session: r.sessionId, tool: r.tool, language: lang, decisions: existing, maxChars: caps.max_input_chars });
     const chunks = buildChunks(r.range, { maxChars: caps.max_input_chars, header });
     if (!force && llm.failed[r.key] && llm.failed[r.key].from === chunks[0].from) continue;
     const session = { id: r.sessionId, tool: r.tool, file: sessionData(r.events, { machine: state.machine }).file };
@@ -234,11 +271,8 @@ async function runSynthesis({ commonDir, force = false, now = new Date(), engine
       const reason = (outcome && outcome.reason) || 'exit';
       llm.last_error = { reason, at };
       log(Object.assign(new Error(`synthesis ${reason}`), { code: 'SYNTHESIS' }));
-      if (REPEATING.has(reason)) {
-        llm.failed[r.key] = { from: chunk.from, reason, at };
-        writeLlmState(commonDir, llm);
-        continue outer;
-      }
+      // Any failure stops the run: a systematic cause must not spend a run on every session.
+      if (REPEATING.has(reason)) llm.failed[r.key] = { from: chunk.from, reason, at };
       writeLlmState(commonDir, llm);
       stopped = { reason };
       break outer;
@@ -246,9 +280,9 @@ async function runSynthesis({ commonDir, force = false, now = new Date(), engine
   }
 
   if (totals.decisions + totals.notes > 0) require('./render.js').refreshFolder({ commonDir });
-  const pending = pendingSessions(commonDir).length;
+  const pending = pendingSessions(commonDir, { now }).length;
   if (stopped) return result('stopped', { ...totals, pending, error: stopped });
   return result(totals.runs > 0 ? 'ran' : 'nothing', { ...totals, pending });
 }
 
-module.exports = { runSynthesis, pendingSessions, llmStatus, readLlmState, defaultEngine };
+module.exports = { runSynthesis, pendingSessions, llmStatus, readLlmState, defaultEngine, effectiveLlm };

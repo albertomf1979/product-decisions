@@ -148,4 +148,4 @@ function refreshFolder({ commonDir }) {
   return files;
 }
 
-module.exports = { buildDocsFiles, refreshFolder, ownSessions, overlayDir, walk, isSessionData, isDecisionData, isNoteData };
+module.exports = { buildDocsFiles, refreshFolder, ownSessions, overlayDir, walk, gapsOf, isSessionData, isDecisionData, isNoteData };
