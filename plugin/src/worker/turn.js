@@ -137,6 +137,10 @@ async function runTurn(job, { commonDir, now = new Date() }) {
     writeSessionMeta(commonDir, job.tool, job.sessionId, {
       ...(readSessionMeta(commonDir, job.tool, job.sessionId) || {}), closed_through: through ? through.event_id : null,
     });
+    if (job.tool === 'codex') {
+      // Codex reports token use on each model request; total it per model at close.
+      writeSessionMeta(commonDir, job.tool, job.sessionId, { ...(readSessionMeta(commonDir, job.tool, job.sessionId) || {}), token_totals: codexTokenTotals(events) });
+    }
     addTokenEvents({ job, commonDir, file, events: readEvents(file), git, now });
   }
 
@@ -222,6 +226,20 @@ function capturable(records, { events, gaps, roots }) {
     if (paused.some(([from, to]) => at >= from && at <= to)) return false;
     return typeof record.cwd !== 'string' || roots.some((root) => within(root, record.cwd));
   });
+}
+
+function codexTokenTotals(events) {
+  const totals = {};
+  for (const e of events) {
+    const usage = e.event_type === 'model_usage' && e.origin !== 'derived' && e.payload && e.payload.token_usage;
+    if (!usage || typeof e.payload.model !== 'string') continue;
+    const sum = totals[e.payload.model] || { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
+    sum.input_tokens += Number.isFinite(usage.input_tokens) ? usage.input_tokens : 0;
+    sum.output_tokens += Number.isFinite(usage.output_tokens) ? usage.output_tokens : 0;
+    sum.cache_read_input_tokens += Number.isFinite(usage.cached_input_tokens) ? usage.cached_input_tokens : 0;
+    totals[e.payload.model] = sum;
+  }
+  return totals;
 }
 
 /** At close: one model_usage per model with the main agent's token totals so far. */

@@ -208,9 +208,18 @@ const hashedContent = (value, salt) => {
   return { redacted_file: true, sha256: digest };
 };
 
+/** File headers of a patch (Codex apply_patch): every file it adds, updates, deletes, or moves to. */
+const PATCH_HEADER = /^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+)$/gm;
+const patchNamesSecret = (text) => typeof text === 'string' && [...text.matchAll(PATCH_HEADER)].some((m) => isSecretPath(m[1].trim()));
+
 function namesSecretFile(input) {
   return Object.entries(input).some(([key, value]) => {
-    if (key === 'command' || key === 'cmd') return typeof value === 'string' && commandTouchesSecretFile(value);
+    if (key === 'command' || key === 'cmd') {
+      // Codex passes a command as an argument array.
+      const text = Array.isArray(value) ? value.filter((item) => typeof item === 'string').join(' ') : value;
+      return typeof text === 'string' && commandTouchesSecretFile(text);
+    }
+    if (patchNamesSecret(value)) return true;
     if (!PATH_FIELD.test(key)) return false;
     return (Array.isArray(value) ? value : [value]).some((item) => typeof item === 'string' && isSecretPath(item));
   });
@@ -227,6 +236,11 @@ function namesSecretFile(input) {
  */
 function protectSecretFiles(payload, salt) {
   const input = payload.tool_input;
+  if (typeof input === 'string' && patchNamesSecret(input)) {
+    const safe = { ...payload, tool_input: hashedContent(input, salt) };
+    for (const field of ['tool_response', 'error']) if (safe[field] !== undefined) safe[field] = hashedContent(safe[field], salt);
+    return safe;
+  }
   if (!input || typeof input !== 'object' || !namesSecretFile(input)) return payload;
 
   const isCarrier = (value) => typeof value === 'string' || (value !== null && typeof value === 'object');

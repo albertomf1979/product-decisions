@@ -84,7 +84,7 @@ test('every Codex hook runs our script as codex with its own event name, synchro
     assert.equal(groups[0].matcher, undefined, event);
     const [hook] = groups[0].hooks;
     assert.equal(hook.type, 'command');
-    assert.equal(hook.command, `node "$PLUGIN_ROOT/scripts/hook.js" codex ${event}`);
+    assert.equal(hook.command, `node "\${PLUGIN_ROOT}/scripts/hook.js" codex ${event}`);
     assert.ok(hook.timeout > 0 && hook.timeout <= 5, event);
     assert.equal(hook.async, undefined, event);
   }

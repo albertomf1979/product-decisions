@@ -635,5 +635,5 @@ test('status warns when a Codex session ran here after the last captured Codex e
 
 test('init explains the Codex hook review', (t) => {
   const { root } = repo(t);
-  assert.match(init(root).stdout, /Using Codex\? Review this plugin's hooks once in \/hooks \(and again after each update\), or nothing is captured\. Codex support is pending review\./);
+  assert.match(init(root).stdout, /Using Codex\? Review this plugin's hooks once in \/hooks \(and again after each update\), or nothing is captured\. Codex support, including native Windows, is pending review\./);
 });

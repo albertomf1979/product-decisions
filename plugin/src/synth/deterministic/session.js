@@ -113,8 +113,17 @@ function renderMarkdown(events, data, config, gaps) {
   ];
   if (data.partial) out.push(`> ${t(lang, 'partial')}`, '');
 
+  // A model shows when it changes, not on every model request (Codex reports each one).
+  let shownModel = null;
   const entries = events
-    .filter((e) => e.event_type !== 'seal')
+    .filter((e) => {
+      if (e.event_type === 'seal') return false;
+      if (e.event_type !== 'model_usage') return true;
+      const model = e.payload && e.payload.model;
+      if (model === shownModel) return false;
+      shownModel = model;
+      return true;
+    })
     .map((e) => ({ at: e.timestamp, sort: `${new Date(e.timestamp).toISOString()} ${e.event_id}`, text: `${timeOf(e.timestamp)} · ${escapeMarkdown(actorLabel(e))} · ${lineFor(e, lang)} · \`${e.event_id}\`` }));
   for (const gap of gaps) {
     entries.push({ sort: `${new Date(gap.from).toISOString()} gap`, text: `${timeOf(gap.from)} · ${t(lang, 'gap', { from: gap.from, to: gap.to })}` });

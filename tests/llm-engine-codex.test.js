@@ -78,9 +78,9 @@ test('the test helpers hide any real codex on this machine', () => {
   assert.match(process.env.PRODUCT_DECISIONS_CODEX_BIN, /no-codex-in-tests$/);
 });
 
-test('consent says synthesis uses the agent that ran the session and that Codex runs have no per-run budget', () => {
-  assert.match(CONSENT, /claude\s+or\s+codex/);
-  assert.match(CONSENT, /Codex has\s+no per-run spending limit/);
+test('consent says Codex synthesis is unverified, runs only on request, and has no per-run budget', () => {
+  assert.match(CONSENT, /For Codex sessions this is unverified/);
+  assert.match(CONSENT, /Codex\s+has\s+no\s+per-run\s+spending\s+limit/);
 });
 
 test('the config accepts codex as an engine', () => {

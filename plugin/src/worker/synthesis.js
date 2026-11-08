@@ -30,7 +30,7 @@ const { resolveCodex, runCodex } = require('../synth/llm/engine-codex.js');
  * Failures that would repeat if retried as they are, and that may have spent quota: they
  * stop the run, and only an explicit sync --llm retries them.
  */
-const REPEATING = new Set(['budget', 'no_output', 'timeout']);
+const REPEATING = new Set(['budget', 'no_output', 'timeout', 'parse']);
 
 /** A session whose last sealed turn is this old counts as closed, though its end was never seen. */
 const IDLE_MS = 6 * 3600000;
@@ -175,12 +175,23 @@ function existingDecisions({ location, commonDir, state, config }) {
 }
 
 /**
+ * Which agent synthesizes a session. "auto" is the agent that ran it. A forced "claude" is
+ * honoured for any session, since claude runs with a spending cap. A forced "codex" is
+ * honoured only for Codex sessions: a shared config must not move Claude Code sessions to
+ * an engine with no per-run spending limit.
+ */
+function engineFor(tool, configured) {
+  if (configured === 'claude') return 'claude';
+  return tool === 'codex' ? 'codex' : 'claude';
+}
+
+/**
  * The person's own agent, in an emptied work directory inside the store. With engine
  * "auto" it is the agent that ran the session (PRD LLM-11): claude -p for Claude Code,
  * codex exec for Codex (unverified, pending review).
  */
 async function defaultEngine({ prompt, system, schema, config, commonDir, tool }) {
-  const name = config.llm.engine === 'auto' ? (tool === 'codex' ? 'codex' : 'claude') : config.llm.engine;
+  const name = engineFor(tool, config.llm.engine);
   const bin = name === 'codex' ? resolveCodex() : resolveClaude();
   if (!bin) return { ok: false, reason: 'missing', detail: `${name} not found`, engine: name };
   const workDir = path.join(storeDir(commonDir), 'tmp', 'synth');
@@ -225,6 +236,9 @@ async function runSynthesis({ commonDir, force = false, now = new Date(), engine
       writeLlmState(commonDir, llm);
       continue;
     }
+    // codex exec cannot run without tools, and that is unverified: never automatically,
+    // only on an explicit sync --llm.
+    if (!force && engineFor(r.tool, caps.engine) === 'codex') continue;
     const header = promptHeader({ session: r.sessionId, tool: r.tool, language: lang, decisions: existing, maxChars: caps.max_input_chars });
     const chunks = buildChunks(r.range, { maxChars: caps.max_input_chars, header });
     if (!force && llm.failed[r.key] && llm.failed[r.key].from === chunks[0].from) continue;
@@ -292,4 +306,4 @@ async function runSynthesis({ commonDir, force = false, now = new Date(), engine
   return result(totals.runs > 0 ? 'ran' : 'nothing', { ...totals, pending });
 }
 
-module.exports = { runSynthesis, pendingSessions, llmStatus, readLlmState, defaultEngine, effectiveLlm };
+module.exports = { runSynthesis, pendingSessions, llmStatus, readLlmState, defaultEngine, effectiveLlm, engineFor };

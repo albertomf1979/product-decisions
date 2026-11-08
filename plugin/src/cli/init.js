@@ -159,7 +159,7 @@ const pushReport = (on) => console.log(on
   ? 'Publishing from this machine is on.'
   : 'Publishing from this machine is off: everything stays here. Run init again without --no-push to turn it on.');
 
-const CODEX_NOTE = "Using Codex? Review this plugin's hooks once in /hooks (and again after each update), or nothing is captured. Codex support is pending review.";
+const CODEX_NOTE = "Using Codex? Review this plugin's hooks once in /hooks (and again after each update), or nothing is captured. Codex support, including native Windows, is pending review.";
 
 const llmReport = (enabled) => console.log(enabled
   ? "LLM synthesis is on for you, within the project's caps."

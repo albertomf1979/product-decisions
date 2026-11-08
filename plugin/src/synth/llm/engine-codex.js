@@ -31,7 +31,7 @@ function runCodex({ bin, prompt, system, schema, model, workDir, timeoutMs = 600
     fs.writeFileSync(schemaFile, JSON.stringify(schema), { mode: 0o600 });
     fs.rmSync(lastFile, { force: true });
     const args = [
-      'exec', '-', '--ephemeral', '--disable', 'hooks', '--sandbox', 'read-only', '--ignore-rules', '--skip-git-repo-check',
+      'exec', '-', '--ephemeral', '--disable', 'hooks', '--sandbox', 'read-only', '--ignore-user-config', '--ignore-rules', '--skip-git-repo-check',
       '-C', workDir, '--output-schema', schemaFile, '-o', lastFile,
       ...(model && !CLAUDE_MODEL.test(model) ? ['-m', model] : []),
     ];

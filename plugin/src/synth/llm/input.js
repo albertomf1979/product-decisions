@@ -73,7 +73,13 @@ function buildChunks(events, { maxChars, header }) {
   const budget = maxChars - header.length - PART_LINE_RESERVE;
   const parts = [];
   let current = null;
+  let lastModel = null;
   for (const event of events) {
+    if (event && event.event_type === 'model_usage') {
+      const model = event.payload && event.payload.model;
+      if (model === lastModel) continue;
+      lastModel = model;
+    }
     const formatted = formatEvent(event);
     if (formatted === null) continue;
     const text = cut(formatted, budget);

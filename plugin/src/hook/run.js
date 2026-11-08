@@ -32,7 +32,10 @@ function resolveModel(normalized, commonDir, tool) {
   if (normalized.modelHint) {
     const { model, source } = normalized.modelHint;
     try {
-      writeSessionMeta(commonDir, tool, normalized.sessionId, { model, model_source: source });
+      // Merge, and write only on a change: Codex reports the model on every event, and
+      // the worker keeps its own fields in the same file.
+      const meta = readSessionMeta(commonDir, tool, normalized.sessionId) || {};
+      if (meta.model !== model || meta.model_source !== source) writeSessionMeta(commonDir, tool, normalized.sessionId, { ...meta, model, model_source: source });
     } catch (err) {
       require('../core/diagnostics.js').logError(commonDir, 'session-meta', err);
     }

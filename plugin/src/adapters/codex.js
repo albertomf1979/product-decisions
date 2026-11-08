@@ -129,17 +129,41 @@ function rollouts(dir) {
   return found.sort((a, b) => b.mtimeMs - a.mtimeMs).slice(0, MAX_ROLLOUTS);
 }
 
-/** The folder a rollout was started in, from its first line (session_meta) only. */
+const CHUNK = 4096;
+const CWD_FIELD = /"cwd"\s*:\s*"((?:[^"\\]|\\.)*)"/;
+
+/**
+ * The folder a rollout was started in. Reads in small chunks up to the end of the first
+ * line (session_meta), never past it, and at most 64 KiB. A longer first line is not
+ * parsed: its cwd field is found by pattern instead.
+ */
 function rolloutCwd(file) {
   const fs = require('node:fs');
   let fd;
   try {
     fd = fs.openSync(file, 'r');
-    const buffer = Buffer.alloc(FIRST_LINE_BYTES);
-    const read = fs.readSync(fd, buffer, 0, FIRST_LINE_BYTES, 0);
-    const first = JSON.parse(buffer.subarray(0, read).toString('utf8').split('\n')[0]);
-    const cwd = first && (first.payload ? first.payload.cwd : first.cwd);
-    return typeof cwd === 'string' ? cwd : null;
+    const chunks = [];
+    let total = 0;
+    let line = null;
+    while (total < FIRST_LINE_BYTES) {
+      const buffer = Buffer.alloc(Math.min(CHUNK, FIRST_LINE_BYTES - total));
+      const read = fs.readSync(fd, buffer, 0, buffer.length, total);
+      if (read === 0) break;
+      const end = buffer.subarray(0, read).indexOf(0x0a);
+      chunks.push(buffer.subarray(0, end < 0 ? read : end));
+      total += read;
+      if (end >= 0) {
+        line = Buffer.concat(chunks).toString('utf8');
+        break;
+      }
+    }
+    if (line !== null) {
+      const first = JSON.parse(line);
+      const cwd = first && (first.payload ? first.payload.cwd : first.cwd);
+      return typeof cwd === 'string' ? cwd : null;
+    }
+    const match = CWD_FIELD.exec(Buffer.concat(chunks).toString('utf8'));
+    return match ? JSON.parse(`"${match[1]}"`) : null;
   } catch {
     return null;
   } finally {

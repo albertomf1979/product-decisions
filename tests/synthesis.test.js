@@ -238,7 +238,7 @@ test('the lock is refreshed while the engine runs', async (t) => {
   assert.ok(refreshed >= 1);
 });
 
-test('auto picks codex for a Codex session and claude for a Claude Code session', async (t) => {
+test('auto picks codex for a Codex session and claude for a Claude Code session, on an explicit run', async (t) => {
   const root = setup(t);
   talk(root, 's1');
   await close(root, 's1');
@@ -257,8 +257,11 @@ test('auto picks codex for a Codex session and claude for a Claude Code session'
     PRODUCT_DECISIONS_CLAUDE_BIN: installFakeClaude(path.join(bins, 'claude')), FAKE_CLAUDE_LOG: logs.claude, FAKE_CLAUDE_MODE: 'ok',
     PRODUCT_DECISIONS_CODEX_BIN: installFakeCodex(path.join(bins, 'codex')), FAKE_CODEX_LOG: logs.codex, FAKE_CODEX_MODE: 'ok',
   });
-  const result = await runSynthesis({ commonDir: common(root) });
-  assert.equal(result.runs, 2);
+  const auto = await runSynthesis({ commonDir: common(root) });
+  assert.equal(auto.runs, 1);
+  assert.equal(fs.existsSync(logs.codex), false);
+  const result = await runSynthesis({ commonDir: common(root), force: true });
+  assert.equal(result.runs, 1);
   assert.match(fs.readFileSync(logs.codex, 'utf8'), /codex ask/);
   assert.ok(!fs.readFileSync(logs.claude, 'utf8').includes('codex ask'));
 });

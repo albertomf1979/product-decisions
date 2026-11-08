@@ -92,7 +92,7 @@ const VERSION = /^[0-9a-f]{8}$/;
 
 function isConsentData(d) {
   return Boolean(d) && d.schema_version === 1 && isText(d.machine)
-    && isList(d.records, (r) => isText(r.at) && isText(r.actor) && isText(r.version) && VERSION.test(r.version) && ['flag', 'interactive'].includes(r.method))
+    && isList(d.records, (r) => isText(r.at) && isText(r.actor) && isText(r.version) && VERSION.test(r.version) && ['flag', 'interactive', 'unknown'].includes(r.method))
     && Boolean(d.texts) && typeof d.texts === 'object' && !Array.isArray(d.texts)
     && Object.entries(d.texts).every(([v, text]) => VERSION.test(v) && isText(text));
 }
@@ -105,7 +105,7 @@ function ownConsents(commonDir, machine) {
   const texts = {};
   for (const e of readEvents(file).filter((x) => x.event_type === 'consent' && x.payload && isText(x.payload.statement))) {
     const version = require('node:crypto').createHash('sha256').update(e.payload.statement).digest('hex').slice(0, 8);
-    records.push({ at: e.timestamp, actor: (e.actor && e.actor.name) || 'unknown', version, method: e.payload.method === 'interactive' ? 'interactive' : 'flag' });
+    records.push({ at: e.timestamp, actor: (e.actor && e.actor.name) || 'unknown', version, method: ['interactive', 'flag'].includes(e.payload.method) ? e.payload.method : 'unknown' });
     texts[version] = e.payload.statement;
   }
   return records.length ? { schema_version: 1, machine, records, texts } : null;
