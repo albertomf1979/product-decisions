@@ -17,7 +17,12 @@ function loadAdapter(tool) {
 function sanitize(normalized, raw, state, commonDir) {
   const { redactValue, protectSecretFiles, compileExtra, oversizedPayload } = require('../core/redact.js');
   const home = require('node:os').homedir();
-  return oversizedPayload(raw)
+  const oversized = oversizedPayload(raw);
+  // An imported record keeps its key, so a second import still recognizes it.
+  if (oversized && typeof normalized.payload.transcript_uuid === 'string') {
+    return { ...oversized, transcript_uuid: normalized.payload.transcript_uuid, imported: true };
+  }
+  return oversized
     || redactValue(
       protectSecretFiles(normalized.payload, state.salt),
       compileExtra([...(state.redact_patterns || []), ...require('../core/config.js').readConfig(commonDir).redact_patterns]),

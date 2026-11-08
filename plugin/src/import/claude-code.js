@@ -244,4 +244,4 @@ function findTranscripts(location, { env = process.env } = {}) {
   return found;
 }
 
-module.exports = { IMPORTER_VERSION, readTranscript, toPayloads, findTranscripts };
+module.exports = { IMPORTER_VERSION, readTranscript, toPayloads, findTranscripts, checkouts };

@@ -14,7 +14,9 @@ Commands:
   verify [--json]  Check that the record has not been altered
   sync [--no-push] [--llm]
                    Bring the record and the folder up to date; --llm also runs
-                   LLM synthesis now`;
+                   LLM synthesis now
+  import [--dry-run] [--session <id>]
+                   Bring in your past Claude Code sessions for this repository`;
 
 const COMMANDS = {
   init: () => require('./init.js').init,
@@ -23,10 +25,11 @@ const COMMANDS = {
   resume: () => require('./pause.js').resume,
   verify: () => require('./verify.js').verify,
   sync: () => require('./sync.js').sync,
+  import: () => require('./import.js').importCommand,
 };
 
 async function main(argv) {
-  const flags = { yes: false, json: false, noPush: false, noLlm: false, llm: false, track: [] };
+  const flags = { yes: false, json: false, noPush: false, noLlm: false, llm: false, dryRun: false, session: null, track: [] };
   const positional = [];
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -35,6 +38,8 @@ async function main(argv) {
     else if (arg === '--no-push') flags.noPush = true;
     else if (arg === '--no-llm') flags.noLlm = true;
     else if (arg === '--llm') flags.llm = true;
+    else if (arg === '--dry-run') flags.dryRun = true;
+    else if (arg === '--session') flags.session = argv[(i += 1)] ?? '';
     else if (arg === '--language') flags.language = argv[(i += 1)];
     else if (arg === '--folder') flags.folder = argv[(i += 1)] ?? '';
     else if (arg === '--track') flags.track.push(argv[(i += 1)]);

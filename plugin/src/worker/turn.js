@@ -276,6 +276,8 @@ async function recoverSessions({ commonDir }) {
       const events = readEvents(path.join(raw, tool, name));
       const last = events[events.length - 1];
       if (!last || last.event_type === 'seal') continue;
+      // An imported session is not this worker's: it gets no snapshot or commits (M5).
+      if (!events.some((event) => event.origin === 'hook')) continue;
       const meta = readSessionMeta(commonDir, tool, last.session_id) || {};
       jobs.push({ kind: 'close', tool, sessionId: last.session_id, cwd: meta.cwd || mainRoot, transcriptPath: meta.transcript_path || null });
     }

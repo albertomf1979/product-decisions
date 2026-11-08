@@ -14,5 +14,7 @@ const NO_CODEX = path.join(__dirname, 'no-codex-in-tests');
 process.env.PRODUCT_DECISIONS_CODEX_BIN = NO_CODEX;
 // status reads the first line of recent Codex rollouts: never the developer's own.
 process.env.CODEX_HOME = path.join(__dirname, 'no-codex-home-in-tests');
+// status and import read Claude Code's project folders: never the developer's own.
+process.env.CLAUDE_CONFIG_DIR = path.join(__dirname, 'no-claude-home-in-tests');
 
 module.exports = { NO_CLAUDE, NO_CODEX };
