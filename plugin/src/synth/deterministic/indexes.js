@@ -4,16 +4,17 @@
 
 const { escapeMarkdown, excerpt, code } = require('./excerpt.js');
 const { t } = require('./i18n.js');
+const { renderDecisionViews, readmeSection } = require('./decisions.js');
 
 const byText = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 const ordered = (all) => [...all].sort((a, b) => byText(`${a.started} ${a.session} ${a.machine}`, `${b.started} ${b.session} ${b.machine}`));
 const people = (data) => data.actors.filter((a) => a.type === 'user').map((a) => escapeMarkdown(a.name)).join(', ');
 const label = (data) => `${data.started.slice(0, 10)} ${data.tool} ${String(data.session).slice(0, 8)}`;
 
-function readme(all, documentChanges, lang) {
+function readme(all, documentChanges, lang, decisions = [], notes = []) {
   const out = [
     `# ${t(lang, 'readme_title')}`, '', `> ${t(lang, 'generated_index')}`, '',
-    t(lang, 'readme_intro'), '', t(lang, 'readme_decisions'), '',
+    t(lang, 'readme_intro'), '', ...readmeSection(decisions, notes, lang),
     `## ${t(lang, 'sessions')}`, '',
     `| ${t(lang, 'date')} | ${t(lang, 'tool')} | ${t(lang, 'people')} | ${t(lang, 'events')} | ${t(lang, 'chronicle')} |`, '|---|---|---|---|---|',
     ...all.map((d) => `| ${d.started.slice(0, 16).replace('T', ' ')} | ${d.tool} | ${people(d)} | ${d.event_count} | [${String(d.session).slice(0, 8)}](${d.file}) |`),
@@ -74,16 +75,18 @@ function sources(all, lang) {
 /**
  * @param {object[]} allSessionData Every .data/sessions/*.json in the merged docs tree.
  * @param {Array<{ at, path, actor, file }>} documentChanges
+ * @param {{ decisions?: object[], notes?: object[] }} [generated] Decision and phase note data files.
  * @returns {Map<string, string>}
  */
-function renderIndexes(allSessionData, documentChanges, config) {
+function renderIndexes(allSessionData, documentChanges, config, { decisions = [], notes = [] } = {}) {
   const all = ordered(allSessionData);
   const docs = [...documentChanges].sort((a, b) => byText(`${a.at} ${a.file}`, `${b.at} ${b.file}`));
   const lang = config.language;
   return new Map([
-    ['README.md', `${readme(all, docs, lang)}\n`],
+    ['README.md', `${readme(all, docs, lang, decisions, notes)}\n`],
     ['03-development/changes.md', `${changes(all, lang)}\n`],
     ['sources/README.md', `${sources(all, lang)}\n`],
+    ...renderDecisionViews(decisions, notes, all, docs, config),
   ]);
 }
 

@@ -70,6 +70,24 @@ function isSessionData(d) {
     && isList(d.sources, (s) => isText(s.type) && Array.isArray(s.event_ids));
 }
 
+const SAFE_FILE = /^[A-Za-z0-9._/-]+$/;
+const isSafeFile = (file, prefix) => isText(file) && file.startsWith(prefix) && SAFE_FILE.test(file) && !file.split('/').includes('..');
+
+function isDecisionData(d) {
+  return Boolean(d) && d.schema_version === 1 && isText(d.id) && /^ADR-\d{8}-[0-9a-f]{6}$/.test(d.id) && isText(d.title)
+    && isSafeFile(d.file, 'decisions/') && isText(d.at) && isText(d.session) && isSafeFile(d.session_file, 'timeline/')
+    && Boolean(d.decided_by) && isText(d.decided_by.type) && isText(d.decided_by.name)
+    && Array.isArray(d.evidence) && d.evidence.every(isText)
+    && Array.isArray(d.related) && d.related.every(isText) && Array.isArray(d.supersedes) && d.supersedes.every(isText);
+}
+
+function isNoteData(d) {
+  const { PHASE_FOLDERS } = require('../synth/llm/notes.js');
+  return Boolean(d) && d.schema_version === 1 && isText(d.id) && Object.prototype.hasOwnProperty.call(PHASE_FOLDERS, d.phase) && isText(d.title)
+    && isSafeFile(d.file, `${PHASE_FOLDERS[d.phase]}/notes/`) && isText(d.at) && isText(d.session)
+    && isSafeFile(d.session_file, 'timeline/') && Array.isArray(d.evidence) && d.evidence.every(isText);
+}
+
 function isDocumentChange(d) {
   return Boolean(d) && isText(d.at) && isText(d.path) && isText(d.actor) && isText(d.file) && d.file.startsWith('01-definition/');
 }
@@ -90,21 +108,30 @@ function buildDocsFiles({ location, commonDir, state, config, bases = [] }) {
     const home = require('node:os').homedir();
     for (const [file, content] of renderSession(events, config, { machine: state.machine, gaps, home })) files.set(file, Buffer.from(content));
   }
+  // Create-once files (document change records, ADRs, phase notes) are added only when
+  // the branch lacks them: a person's edit on the docs branch is never overwritten.
   const overlay = overlayDir(commonDir);
-  for (const full of walk(overlay)) files.set(path.relative(overlay, full).split(path.sep).join('/'), fs.readFileSync(full));
+  for (const full of walk(overlay)) {
+    const rel = path.relative(overlay, full).split(path.sep).join('/');
+    if (!files.has(rel)) files.set(rel, fs.readFileSync(full));
+  }
 
   const sessions = [];
   const documentChanges = [];
+  const decisions = [];
+  const notes = [];
   for (const [file, content] of files) {
     try {
       const data = file.startsWith('.data/') ? JSON.parse(content.toString('utf8')) : null;
       if (file.startsWith('.data/sessions/') && isSessionData(data)) sessions.push(data);
       if (file.startsWith('.data/documents/') && isDocumentChange(data)) documentChanges.push(data);
+      if (file.startsWith('.data/decisions/') && isDecisionData(data)) decisions.push(data);
+      if (file.startsWith('.data/phases/') && isNoteData(data)) notes.push(data);
     } catch {
       // A damaged data file is skipped, not fatal.
     }
   }
-  for (const [file, content] of renderIndexes(sessions, documentChanges, config)) files.set(file, Buffer.from(content));
+  for (const [file, content] of renderIndexes(sessions, documentChanges, config, { decisions, notes })) files.set(file, Buffer.from(content));
   return files;
 }
 
@@ -121,4 +148,4 @@ function refreshFolder({ commonDir }) {
   return files;
 }
 
-module.exports = { buildDocsFiles, refreshFolder, ownSessions, overlayDir, walk, isSessionData };
+module.exports = { buildDocsFiles, refreshFolder, ownSessions, overlayDir, walk, isSessionData, isDecisionData, isNoteData };
