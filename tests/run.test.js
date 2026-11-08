@@ -414,3 +414,47 @@ test('the home folder is masked everywhere in an event', (t) => {
   assert.deepEqual(byType('tool_call').sources[0], { type: 'file', path: 'PRD.md', commit: byType('tool_call').git.head });
   assert.equal(byType('tool_call').summary, 'Read PRD.md');
 });
+
+test('buildCapturedEvent builds the same event capture appends, without appending or starting the worker', (t) => {
+  const { buildCapturedEvent } = require('../plugin/src/hook/run.js');
+  const { locateRepo } = require('../plugin/src/core/locate.js');
+  const { readLocal } = require('../plugin/src/core/state.js');
+  const adapter = require('../plugin/src/adapters/claude-code.js');
+  const { root } = activeRepo(t);
+  const location = locateRepo(root);
+  const state = readLocal(location.commonDir);
+  const payload = fixture('PostToolUse-Read.json', { cwd: root, tool_input: { file_path: path.join(root, 'PRD.md') } });
+  const raw = Buffer.from(JSON.stringify(payload));
+  const built = buildCapturedEvent({ payload, raw, location, state, tool: 'claude-code', adapter, cwd: root });
+  assert.equal(capturedEvents(root, { all: true }).length, 0, 'nothing is appended');
+  assert.equal(walk(path.join(storeOf(root), 'state')).some((file) => file.includes('queue')), false, 'no job is queued');
+  assert.equal(contentHash(built), built.content_hash);
+
+  const result = runHook({ stdin: JSON.stringify(payload), cwd: root, event: payload.hook_event_name });
+  assertSilent(result, 'capture');
+  const [captured] = capturedEvents(root);
+  const comparable = ({ event_id: _id, timestamp: _ts, content_hash: _hash, ...rest }) => rest;
+  assert.deepEqual(comparable(built), comparable(captured));
+});
+
+test('an imported event keeps its origin, time, and given git, and leaves the session meta alone', (t) => {
+  const { buildCapturedEvent } = require('../plugin/src/hook/run.js');
+  const { locateRepo } = require('../plugin/src/core/locate.js');
+  const { readLocal } = require('../plugin/src/core/state.js');
+  const { readSessionMeta } = require('../plugin/src/core/store.js');
+  const adapter = require('../plugin/src/adapters/claude-code.js');
+  const { root } = activeRepo(t);
+  const location = locateRepo(root);
+  const state = readLocal(location.commonDir);
+  const payload = fixture('SessionStart-compact-model.json', { cwd: root });
+  const git = { branch: 'feature', head: null, worktree: '.' };
+  const now = new Date('2026-11-01T10:00:00Z');
+  const event = buildCapturedEvent({
+    payload, raw: Buffer.from(JSON.stringify(payload)), location, state, tool: 'claude-code', adapter, cwd: root, origin: 'imported', now, git,
+  });
+  assert.equal(event.origin, 'imported');
+  assert.equal(Date.parse(event.timestamp), now.getTime());
+  assert.deepEqual(event.git, git);
+  assert.equal(event.model, 'claude-haiku-5-5', 'the hint still names the model');
+  assert.equal(readSessionMeta(location.commonDir, 'claude-code', payload.session_id), null, 'no session meta is written');
+});

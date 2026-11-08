@@ -46,17 +46,22 @@ function resolveModel(normalized, commonDir, tool) {
   return { model: meta.model ?? null, modelSource: meta.model_source ?? null, toolVersion: meta.tool_version ?? null };
 }
 
-/** The active path. These modules load only here, so inactive projects stay fast. */
-function capture({ payload, raw, location, state, tool, adapter, cwd }) {
+/**
+ * Builds the event a payload becomes: normalized, sanitized, home folder masked, model
+ * resolved. It neither appends nor starts the worker. An imported event brings its own
+ * time and git, and leaves the session meta alone: the transcript, not the hook, is its
+ * source.
+ *
+ * @returns {object | null}
+ */
+function buildCapturedEvent({ payload, raw, location, state, tool, adapter, cwd, origin = 'hook', now, git }) {
   const normalized = adapter.normalize(payload);
-  if (!normalized) return;
+  if (!normalized) return null;
 
   const { readGit } = require('../core/githead.js');
   const { extractSources } = require('../core/sources.js');
   const { summarize } = require('../core/summary.js');
   const { buildEvent } = require('../core/event.js');
-  const { rawFilePath, appendLine } = require('../core/store.js');
-  const { logLatency } = require('../core/diagnostics.js');
 
   normalized.payload = sanitize(normalized, raw, state, location.commonDir);
   // Masked like the payload, so paths inside it still read as relative to the session.
@@ -64,8 +69,10 @@ function capture({ payload, raw, location, state, tool, adapter, cwd }) {
   const home = require('node:os').homedir();
   if (normalized.cwd) normalized.cwd = maskHome(normalized.cwd, home);
   if (normalized.transcriptPath) normalized.transcriptPath = maskHome(normalized.transcriptPath, home);
-  const { model, modelSource, toolVersion } = resolveModel(normalized, location.commonDir, tool);
-  const git = readGit(location, payload.cwd || cwd);
+  const { model, modelSource, toolVersion } = origin === 'hook'
+    ? resolveModel(normalized, location.commonDir, tool)
+    : { model: normalized.modelHint ? normalized.modelHint.model : null, modelSource: normalized.modelHint ? normalized.modelHint.source : null, toolVersion: null };
+  const gitState = git || readGit(location, payload.cwd || cwd);
   const event = buildEvent(normalized, {
     tool,
     toolVersion,
@@ -73,23 +80,34 @@ function capture({ payload, raw, location, state, tool, adapter, cwd }) {
     actorName: state.actor_name,
     model,
     modelSource,
-    git,
-    sources: extractSources(normalized, git),
+    git: gitState,
+    sources: extractSources(normalized, gitState),
     summary: summarize(normalized),
+    origin,
+    now,
   });
+  return event;
+}
 
-  appendLine(rawFilePath(location.commonDir, tool, normalized.sessionId, state.machine), JSON.stringify(event));
+/** The active path. These modules load only here, so inactive projects stay fast. */
+function capture({ payload, raw, location, state, tool, adapter, cwd }) {
+  const event = buildCapturedEvent({ payload, raw, location, state, tool, adapter, cwd });
+  if (!event) return;
+  const { rawFilePath, appendLine } = require('../core/store.js');
+  const { logLatency } = require('../core/diagnostics.js');
+
+  appendLine(rawFilePath(location.commonDir, tool, event.session_id, state.machine), JSON.stringify(event));
 
   // The worker does the heavy work. Failing to start it must never lose the event above.
   const { triggerFor } = require('../worker/trigger.js');
-  const kind = triggerFor(normalized.eventType);
+  const kind = triggerFor(event.event_type);
   if (kind) {
     try {
       const { enqueue } = require('../worker/queue.js');
       enqueue(location.commonDir, kind === 'recover' ? { kind } : {
         kind,
         tool,
-        sessionId: normalized.sessionId,
+        sessionId: event.session_id,
         cwd: payload.cwd || cwd,
         transcriptPath: payload.transcript_path || null,
       });
@@ -99,7 +117,7 @@ function capture({ payload, raw, location, state, tool, adapter, cwd }) {
     }
   }
   // Measured from process start, so it includes Node's own startup.
-  logLatency(location.commonDir, { tool, event: normalized.hookEvent, ms: performance.now(), bytes: raw.length });
+  logLatency(location.commonDir, { tool, event: payload.hook_event_name, ms: performance.now(), bytes: raw.length });
 }
 
 /** Logs a failure, but only where capture is active: otherwise the project stays untouched. */
@@ -175,4 +193,4 @@ function handlePayload({ raw, tool, hookEvent, cwd, env = process.env }) {
   }
 }
 
-module.exports = { handlePayload };
+module.exports = { handlePayload, buildCapturedEvent };
