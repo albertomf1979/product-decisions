@@ -126,3 +126,62 @@ test('a file that is not a transcript is read without throwing', () => {
   assert.equal(readTranscript(file).records.length, 0);
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+const { findTranscripts } = require('../plugin/src/import/claude-code.js');
+const { makeRepo, addWorktree } = require('./helpers/repo.js');
+const { locateRepo } = require('../plugin/src/core/locate.js');
+
+const projectFolder = (claudeHome, folder) => path.join(claudeHome, 'projects', folder.replace(/[^A-Za-z0-9]/g, '-'));
+const putTranscript = (claudeHome, folder, sessionId) => {
+  const dir = projectFolder(claudeHome, folder);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${sessionId}.jsonl`), '{}\n');
+};
+
+test('transcripts come from the repository, its worktrees, and its ancestor folders, and nowhere else', (t) => {
+  const repo = makeRepo();
+  t.after(repo.cleanup);
+  const wt = addWorktree(repo.root, 'wt');
+  const claudeHome = path.join(repo.base, 'claude-home');
+  putTranscript(claudeHome, repo.root, 'in-repo');
+  putTranscript(claudeHome, wt, 'in-worktree');
+  putTranscript(claudeHome, repo.base, 'in-parent');
+  putTranscript(claudeHome, path.join(repo.base, 'other-project'), 'unrelated');
+  // A subagent transcript lives one level down and is not a session of its own.
+  fs.mkdirSync(path.join(projectFolder(claudeHome, repo.root), 'in-repo', 'subagents'), { recursive: true });
+  fs.writeFileSync(path.join(projectFolder(claudeHome, repo.root), 'in-repo', 'subagents', 'agent-x.jsonl'), '{}\n');
+
+  const found = findTranscripts(locateRepo(repo.root), { env: { CLAUDE_CONFIG_DIR: claudeHome, HOME: repo.base } });
+  assert.deepEqual(found.map(({ sessionId, kind, folder }) => [sessionId, kind, folder]), [
+    ['in-repo', 'repository', repo.root],
+    ['in-worktree', 'worktree', wt],
+    ['in-parent', 'ancestor', repo.base],
+  ]);
+  assert.equal(found[0].file, path.join(projectFolder(claudeHome, repo.root), 'in-repo.jsonl'));
+});
+
+test('from a linked worktree, the same transcripts are found', (t) => {
+  const repo = makeRepo();
+  t.after(repo.cleanup);
+  const wt = addWorktree(repo.root, 'wt');
+  const claudeHome = path.join(repo.base, 'claude-home');
+  putTranscript(claudeHome, repo.root, 'in-repo');
+  const found = findTranscripts(locateRepo(wt), { env: { CLAUDE_CONFIG_DIR: claudeHome, HOME: repo.base } });
+  assert.deepEqual(found.map((item) => item.sessionId), ['in-repo']);
+});
+
+test('ancestors stop at the home folder', (t) => {
+  const repo = makeRepo();
+  t.after(repo.cleanup);
+  const claudeHome = path.join(repo.base, 'claude-home');
+  putTranscript(claudeHome, path.dirname(repo.base), 'above-home');
+  const found = findTranscripts(locateRepo(repo.root), { env: { CLAUDE_CONFIG_DIR: claudeHome, HOME: repo.base } });
+  assert.deepEqual(found, []);
+});
+
+test('a missing Claude home gives no transcripts', (t) => {
+  const repo = makeRepo();
+  t.after(repo.cleanup);
+  const found = findTranscripts(locateRepo(repo.root), { env: { CLAUDE_CONFIG_DIR: path.join(repo.base, 'nowhere'), HOME: repo.base } });
+  assert.deepEqual(found, []);
+});

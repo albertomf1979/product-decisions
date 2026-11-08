@@ -6,6 +6,8 @@
 // 2.1.310.
 
 const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const crypto = require('node:crypto');
 
 const IMPORTER_VERSION = 1;
@@ -180,4 +182,66 @@ function toPayloads(records, { sessionId }) {
   return { items, skipped };
 }
 
-module.exports = { IMPORTER_VERSION, readTranscript, toPayloads };
+/** The checkouts of a repository: the main one first, then each linked worktree. */
+function checkouts(location) {
+  const main = path.resolve(location.mainRoot);
+  const found = [main];
+  try {
+    const { git } = require('../git/plumbing.js');
+    const out = git(['worktree', 'list', '--porcelain'], { cwd: location.worktreeRoot, allowFail: true }).stdout.toString('utf8');
+    for (const line of out.split('\n')) {
+      if (line.startsWith('worktree ')) found.push(path.resolve(line.slice('worktree '.length)));
+    }
+  } catch {
+    // Without Git, the main checkout is still known.
+  }
+  return [...new Set(found)];
+}
+
+/** Every parent of a folder, nearest first, up to and including home; never the filesystem root. */
+function ancestors(folder, home) {
+  const out = [];
+  let dir = path.dirname(folder);
+  const stop = path.resolve(home);
+  const underHome = path.relative(stop, folder) !== '' && !path.relative(stop, folder).startsWith('..') && !path.isAbsolute(path.relative(stop, folder));
+  while (dir !== path.dirname(dir)) {
+    out.push(dir);
+    if (underHome && dir === stop) break;
+    dir = path.dirname(dir);
+  }
+  return out;
+}
+
+/**
+ * The transcripts Claude Code kept for this repository: sessions opened in the main
+ * checkout, in each worktree, or in a folder above the repository (whose records the
+ * importer then filters by cwd). Only file names are read here.
+ *
+ * @returns {Array<{ file: string, sessionId: string, folder: string, kind: 'repository' | 'worktree' | 'ancestor' }>}
+ */
+function findTranscripts(location, { env = process.env } = {}) {
+  const home = env.HOME || env.USERPROFILE || os.homedir();
+  const claudeHome = env.CLAUDE_CONFIG_DIR || path.join(home, '.claude');
+  const [main, ...worktrees] = checkouts(location);
+  const folders = [
+    { folder: main, kind: 'repository' },
+    ...worktrees.map((folder) => ({ folder, kind: 'worktree' })),
+    ...ancestors(main, home).map((folder) => ({ folder, kind: 'ancestor' })),
+  ];
+  const found = [];
+  for (const { folder, kind } of folders) {
+    const dir = path.join(claudeHome, 'projects', folder.replace(/[^A-Za-z0-9]/g, '-'));
+    let names;
+    try {
+      names = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of names.filter((e) => e.isFile() && e.name.endsWith('.jsonl')).sort((a, b) => a.name.localeCompare(b.name))) {
+      found.push({ file: path.join(dir, entry.name), sessionId: entry.name.slice(0, -'.jsonl'.length), folder, kind });
+    }
+  }
+  return found;
+}
+
+module.exports = { IMPORTER_VERSION, readTranscript, toPayloads, findTranscripts };
