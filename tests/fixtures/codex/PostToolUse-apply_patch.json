@@ -1,0 +1,15 @@
+{
+  "session_id": "019a6f2e-0000-7000-8000-000000000001",
+  "transcript_path": "/home/user/.codex/sessions/2026/11/08/rollout-2026-11-08T10-00-00-019a6f2e.jsonl",
+  "cwd": "/home/user/project",
+  "model": "gpt-5-codex",
+  "hook_event_name": "PostToolUse",
+  "turn_id": "turn-1",
+  "permission_mode": "default",
+  "tool_name": "apply_patch",
+  "tool_use_id": "call_2",
+  "tool_input": {
+    "input": "*** Begin Patch\n*** Update File: PRD.md\n@@\n-# PRD\n+# PRD\n+\n+## Scope\n*** Add File: src/new.js\n+module.exports = {};\n*** End Patch"
+  },
+  "tool_response": "Success. Updated the following files:\nM PRD.md\nA src/new.js"
+}

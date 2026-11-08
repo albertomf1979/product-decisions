@@ -1,0 +1,10 @@
+{
+  "session_id": "019a6f2e-0000-7000-8000-000000000001",
+  "transcript_path": "/home/user/.codex/sessions/2026/11/08/rollout-2026-11-08T10-00-00-019a6f2e.jsonl",
+  "cwd": "/home/user/project",
+  "model": "gpt-5-codex",
+  "hook_event_name": "UserPromptSubmit",
+  "turn_id": "turn-1",
+  "permission_mode": "default",
+  "prompt": "Add a scope section to the PRD"
+}

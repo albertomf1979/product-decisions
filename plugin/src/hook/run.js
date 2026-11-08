@@ -8,7 +8,9 @@ const ENVELOPE_WINDOW = 64 * 1024;
 const ENVELOPE_FIELDS = ['session_id', 'cwd', 'transcript_path', 'hook_event_name', 'tool_name', 'agent_id', 'agent_type'];
 
 function loadAdapter(tool) {
-  return tool === 'claude-code' ? require('../adapters/claude-code.js') : null;
+  if (tool === 'claude-code') return require('../adapters/claude-code.js');
+  if (tool === 'codex') return require('../adapters/codex.js');
+  return null;
 }
 
 /** Replaces the payload with what may be stored: secret files hashed, secrets redacted. */
