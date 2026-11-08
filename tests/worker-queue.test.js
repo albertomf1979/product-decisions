@@ -171,3 +171,55 @@ test('the worker does nothing while another holds the lock', async (t) => {
   assert.equal(ran, false);
   release();
 });
+
+test('after a close the worker publishes, synthesizes, and publishes again only when something was created', async (t) => {
+  for (const [created, expected] of [[1, ['s2', 'publish', 'synthesize', 'publish']], [0, ['s2', 'publish', 'synthesize']]]) {
+    const dir = common(t);
+    const seen = [];
+    enqueue(dir, job({ sessionId: 's2', kind: 'close' }));
+    await runWorker({
+      commonDir: dir,
+      jobs: {
+        turn: async (j) => seen.push(j.sessionId),
+        publish: async () => seen.push('publish'),
+        recover: async () => [],
+        synthesize: async ({ commonDir, refresh }) => {
+          assert.equal(commonDir, dir);
+          assert.equal(typeof refresh, 'function');
+          seen.push('synthesize');
+          return { decisions: created, notes: 0 };
+        },
+      },
+    });
+    assert.deepEqual(seen, expected);
+  }
+});
+
+test('a turn job alone does not synthesize', async (t) => {
+  const dir = common(t);
+  let synthesized = false;
+  enqueue(dir, job());
+  await runWorker({ commonDir: dir, jobs: { turn: async () => {}, publish: async () => {}, recover: async () => [], synthesize: async () => { synthesized = true; return null; } } });
+  assert.equal(synthesized, false);
+});
+
+test('jobs queued while synthesis ran are processed before the worker exits', async (t) => {
+  const dir = common(t);
+  const seen = [];
+  enqueue(dir, job({ sessionId: 's1', kind: 'close' }));
+  await runWorker({
+    commonDir: dir,
+    jobs: {
+      turn: async (j) => seen.push(j.sessionId),
+      publish: async () => seen.push('publish'),
+      recover: async () => [],
+      synthesize: async () => {
+        seen.push('synthesize');
+        if (!seen.includes('s3')) enqueue(dir, job({ sessionId: 's3' }));
+        return { decisions: 0, notes: 0 };
+      },
+    },
+  });
+  assert.deepEqual(seen, ['s1', 'publish', 'synthesize', 's3']);
+  assert.equal(takePending(dir).length, 0);
+});

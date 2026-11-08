@@ -1,5 +1,7 @@
 'use strict';
 
+require('./no-real-claude.js');
+
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 

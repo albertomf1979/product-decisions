@@ -208,6 +208,7 @@ function collect(location) {
     latency: latencyStats(store),
     errors: errorStats(store),
     capture_hint: state && state.activated ? captureHint(location, tools) : null,
+    llm: state && state.activated ? require('../worker/synthesis.js').llmStatus(location.commonDir) : null,
     runtime: { cli_node: process.version, git: gitVersion() },
   };
 }
@@ -237,6 +238,12 @@ function render(status) {
   }
   for (const warning of pub.warnings) {
     if (warning === 'raw_ref_public') lines.push('Warning: this repository is public and holds a published raw record.');
+  }
+  if (status.llm) {
+    const l = status.llm;
+    const mode = !l.project_enabled ? 'off for this project' : !l.person_enabled ? 'off for you' : 'on';
+    const error = l.last_error ? `, last error: ${l.last_error.reason} at ${l.last_error.at}` : '';
+    lines.push(`LLM synthesis: ${mode}, model ${l.model}, ${l.runs_today} of ${l.max_runs_per_day} runs today, ${l.pending_sessions} sessions pending${error}`);
   }
   lines.push(`Seals: ${status.seals.sessions} sessions, ${status.seals.unsealed_events} events not sealed yet, ${status.seals.problems} problems`);
   lines.push(`Stored: ${(status.store.bytes / 1024).toFixed(1)} KiB on this machine`);

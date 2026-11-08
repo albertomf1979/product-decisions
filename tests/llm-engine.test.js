@@ -97,3 +97,9 @@ test('resolveClaude runs an npm .cmd shim through node on Windows, and prefers c
   fs.writeFileSync(path.join(dir, 'odd.cmd'), '@echo off\r\nsomething else\r\n');
   assert.equal(resolveClaude({ env: { PRODUCT_DECISIONS_CLAUDE_BIN: path.join(dir, 'odd.cmd') }, platform: 'win32' }), null);
 });
+
+test('the test helpers hide any real claude on this machine', () => {
+  require('./helpers/repo.js');
+  assert.equal(resolveClaude(), null);
+  assert.match(process.env.PRODUCT_DECISIONS_CLAUDE_BIN, /no-claude-in-tests$/);
+});

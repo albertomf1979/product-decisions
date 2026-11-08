@@ -10,6 +10,14 @@ const PHRASES = {
   raw: { published: 'Raw record published.', local: 'Raw record kept on this machine.', pending: 'Raw record could not be pushed yet; it will be retried.' },
 };
 
+/** What sync says about LLM synthesis after an explicit --llm. */
+function llmMessage(synthesis) {
+  if (synthesis.status === 'no_consent') return 'LLM synthesis needs the current consent. Run init to read and accept it.';
+  if (synthesis.status === 'stopped' && synthesis.error.reason === 'missing') return 'LLM synthesis could not start: claude was not found. Set PRODUCT_DECISIONS_CLAUDE_BIN to its path.';
+  if (synthesis.status === 'stopped') return `LLM synthesis stopped: ${synthesis.error.reason}. It will be retried after the next session.`;
+  return `LLM synthesis: ${synthesis.runs} runs, ${synthesis.decisions} decisions, ${synthesis.notes} phase notes, ${synthesis.rejected} items rejected.`;
+}
+
 /**
  * Processes the sessions that were never finished (no seal after their last event),
  * then publishes. Finished sessions are left as they are: they must not collect work
@@ -24,18 +32,22 @@ async function sync({ cwd, flags }) {
 
   // The worker may be running; wait for it rather than race it.
   const { withLock } = require('../worker/queue.js');
-  const outcome = await withLock(location.commonDir, async () => {
+  const outcome = await withLock(location.commonDir, async (release) => {
     const adopted = project.materialize(location, declared);
     if (adopted.blocked) throw new UsageError(`The team's documents use the folder name "${adopted.config.folder}", but a path with that name already exists here. Move it aside, then run sync again.`);
     project.adopt(location, declared);
     const { runTurn, recoverSessions } = require('../worker/turn.js');
     for (const job of await recoverSessions({ commonDir: location.commonDir })) await runTurn(job, { commonDir: location.commonDir });
+    // An explicit --llm runs synthesis now, before publishing, so new decisions go out too.
+    const { runSynthesis, pendingSessions } = require('../worker/synthesis.js');
+    const synthesis = flags.llm ? await runSynthesis({ commonDir: location.commonDir, force: true, refresh: release.refresh }) : null;
     const push = !flags.noPush && mayPush(state);
     const result = await require('../worker/publish.js').publish({ commonDir: location.commonDir, push });
-    return { result, rejected: [...new Set([...adopted.rejected, ...(result.rejected || [])])] };
+    const pending = synthesis ? 0 : pendingSessions(location.commonDir).length;
+    return { result, synthesis, pending, rejected: [...new Set([...adopted.rejected, ...(result.rejected || [])])] };
   });
   if (!outcome.ran) throw new UsageError('The background worker is busy. Try again in a moment.');
-  const { result, rejected } = outcome.value;
+  const { result, rejected, synthesis, pending } = outcome.value;
   if (!result) throw new UsageError('This repository could not be matched to its product-decisions store. Run: product-decisions init');
   const config = require('../core/config.js').readConfig(location.commonDir);
   const notice = project.rejectionNotice(rejected, config);
@@ -52,6 +64,8 @@ async function sync({ cwd, flags }) {
   for (const warning of result.warnings) {
     if (warning === 'raw_ref_public') console.log('Warning: this repository is public and already holds a published raw record. See the README for how to remove it.');
   }
+  if (synthesis) console.log(llmMessage(synthesis));
+  else if (pending > 0) console.log(`LLM synthesis is pending for ${pending} sessions. Run: product-decisions sync --llm`);
   console.log(`The folder ${config.folder}/ is up to date.`);
   return 0;
 }

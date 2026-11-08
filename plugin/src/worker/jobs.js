@@ -17,4 +17,14 @@ module.exports = {
   },
   /** @returns {Promise<object[]>} Jobs for sessions that ended without a close event. */
   recover: (ctx) => require('./turn.js').recoverSessions(ctx),
+  /**
+   * LLM synthesis of the ranges closed so far, within the caps. Its own checks decide
+   * whether it runs at all (consent, opt-out, project switch).
+   *
+   * @returns {Promise<object>}
+   */
+  synthesize: (ctx) => {
+    const { logError } = require('../core/diagnostics.js');
+    return require('./synthesis.js').runSynthesis({ commonDir: ctx.commonDir, refresh: ctx.refresh, log: (err) => logError(ctx.commonDir, 'synthesis', err) });
+  },
 };

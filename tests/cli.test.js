@@ -181,7 +181,7 @@ test('status --json reports the agreed shape', (t) => {
   const result = runCli(['status', '--json'], { cwd: root });
   assert.equal(result.status, 0, result.stderr);
   const status = JSON.parse(result.stdout);
-  assert.deepEqual(Object.keys(status).sort(), ['activated', 'actor', 'capture_hint', 'errors', 'latency', 'paused', 'project', 'publication', 'repo', 'runtime', 'seals', 'store', 'tools']);
+  assert.deepEqual(Object.keys(status).sort(), ['activated', 'actor', 'capture_hint', 'errors', 'latency', 'llm', 'paused', 'project', 'publication', 'repo', 'runtime', 'seals', 'store', 'tools']);
   assert.equal(status.repo.root, root);
   assert.equal(status.activated, true);
   assert.equal(status.paused, false);
@@ -519,4 +519,100 @@ test('the usage text lists --no-llm and --llm', () => {
   const { stdout } = runCli(['--help']);
   assert.match(stdout, /init \[--yes\] \[--no-push\] \[--no-llm\]/);
   assert.match(stdout, /sync \[--no-push\] \[--llm\]/);
+});
+
+// LLM synthesis through the CLI, with the fake claude only.
+const { buildEvent: buildEventForLlm } = require('../plugin/src/core/event.js');
+const { rawFilePath: rawFileForLlm } = require('../plugin/src/core/store.js');
+const { installFakeClaude } = require('./helpers/fake-claude.js');
+
+function seedSession(root) {
+  const file = rawFileForLlm(common(root), 'claude-code', 'llm-1', readLocal(common(root)).machine);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const make = (eventType, payload, actorType) => buildEventForLlm(
+    { eventType, actorType, llmName: 'claude', agent: { name: 'main' }, payload },
+    { tool: 'claude-code', sessionId: 'llm-1', actorName: 'Test Person', git: null, sources: [], summary: eventType },
+  );
+  const prompt = make('user_prompt', { prompt: 'Keep the raw record in a custom ref' }, 'user');
+  fs.appendFileSync(file, [prompt, make('agent_response', { last_assistant_message: 'Done' }, 'llm')].map((e) => `${JSON.stringify(e)}\n`).join(''));
+  return prompt;
+}
+function fakeClaude(root, prompt, mode = 'ok') {
+  const dir = path.join(root, '..', 'fake-claude');
+  const log = path.join(dir, 'log.jsonl');
+  const output = { decisions: [{ title: 'Keep the raw record in a custom ref', decided_by: 'user', context: 'c', decision: 'd', alternatives: [], consequences: 'q', evidence: [prompt.event_id], related: [], supersedes: [] }], phase_notes: [] };
+  return { log, env: { PRODUCT_DECISIONS_CLAUDE_BIN: installFakeClaude(dir), FAKE_CLAUDE_MODE: mode, FAKE_CLAUDE_LOG: log, FAKE_CLAUDE_OUTPUT: JSON.stringify(output) } };
+}
+
+test('sync --llm runs synthesis with the fake claude and reports the counts', (t) => {
+  const { root } = repo(t);
+  init(root);
+  const prompt = seedSession(root);
+  const fake = fakeClaude(root, prompt);
+  const { status, stdout, stderr } = runCli(['sync', '--no-push', '--llm'], { cwd: root, env: fake.env });
+  assert.equal(status, 0, stderr);
+  assert.match(stdout, /LLM synthesis: 1 runs, 1 decisions, 0 phase notes, 0 items rejected\./);
+  const seen = JSON.parse(fs.readFileSync(fake.log, 'utf8').trim().split('\n').pop());
+  assert.equal(seen.synth, '1');
+  assert.ok(seen.stdin.includes(prompt.event_id));
+  assert.ok(fs.readdirSync(path.join(root, 'product-decisions', 'decisions')).some((f) => f.endsWith('-keep-the-raw-record-in-a-custom-ref.md')));
+});
+
+test('sync without --llm only reports what is pending', (t) => {
+  const { root } = repo(t);
+  init(root);
+  const fake = fakeClaude(root, seedSession(root));
+  const { stdout } = runCli(['sync', '--no-push'], { cwd: root, env: fake.env });
+  assert.match(stdout, /LLM synthesis is pending for 1 sessions\. Run: product-decisions sync --llm/);
+  assert.equal(fs.existsSync(fake.log), false);
+});
+
+test('sync --llm explains a missing claude', (t) => {
+  const { root } = repo(t);
+  init(root);
+  seedSession(root);
+  const { status, stdout } = runCli(['sync', '--no-push', '--llm'], { cwd: root });
+  assert.equal(status, 0);
+  assert.match(stdout, /LLM synthesis could not start: claude was not found\. Set PRODUCT_DECISIONS_CLAUDE_BIN to its path\./);
+});
+
+test('sync --llm without the current consent says so', (t) => {
+  const { root } = repo(t);
+  init(root);
+  const fake = fakeClaude(root, seedSession(root));
+  const state = readLocal(common(root));
+  fs.writeFileSync(path.join(common(root), 'product-decisions', 'local.json'), JSON.stringify({ ...state, consent_sha: 'older-text' }));
+  const { stdout } = runCli(['sync', '--no-push', '--llm'], { cwd: root, env: fake.env });
+  assert.match(stdout, /LLM synthesis needs the current consent\. Run init to read and accept it\./);
+  assert.equal(fs.existsSync(fake.log), false);
+});
+
+test('sync --llm reports a failed run and when it is retried', (t) => {
+  const { root } = repo(t);
+  init(root);
+  const fake = fakeClaude(root, seedSession(root), 'auth');
+  const { stdout } = runCli(['sync', '--no-push', '--llm'], { cwd: root, env: fake.env });
+  assert.match(stdout, /LLM synthesis stopped: auth\. It will be retried after the next session\./);
+});
+
+test('status shows LLM use against the caps', (t) => {
+  const { root } = repo(t);
+  init(root);
+  seedSession(root);
+  runCli(['sync', '--no-push'], { cwd: root });
+  assert.match(runCli(['status'], { cwd: root }).stdout, /LLM synthesis: on, model sonnet, 0 of 10 runs today, 1 sessions pending/);
+  const json = JSON.parse(runCli(['status', '--json'], { cwd: root }).stdout);
+  assert.equal(json.llm.max_runs_per_day, 10);
+  assert.equal(json.llm.pending_sessions, 1);
+  runCli(['init', '--yes', '--no-llm'], { cwd: root });
+  assert.match(runCli(['status'], { cwd: root }).stdout, /LLM synthesis: off for you,/);
+});
+
+test('a full cycle with synthesis leaves the project untouched', (t) => {
+  const { root } = repo(t);
+  init(root);
+  const before = { head: git(root, 'rev-parse', 'HEAD'), porcelain: git(root, 'status', '--porcelain'), branches: git(root, 'branch', '--format=%(refname:short)') };
+  const fake = fakeClaude(root, seedSession(root));
+  assert.equal(runCli(['sync', '--no-push', '--llm'], { cwd: root, env: fake.env }).status, 0);
+  assert.deepEqual({ head: git(root, 'rev-parse', 'HEAD'), porcelain: git(root, 'status', '--porcelain'), branches: git(root, 'branch', '--format=%(refname:short)') }, before);
 });
