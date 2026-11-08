@@ -1,6 +1,6 @@
 # Claude Code hook fixtures
 
-Payloads captured on 2026-11-05 from Claude Code 2.1.310 by the probe in `spikes/s1-hook-probe`, with the home directory replaced by `/home/user`. File names follow `<HookEvent>[-variant].json`.
+Payloads captured on 2026-11-05 from Claude Code 2.1.310 by a probe plugin, with the home directory replaced by `/home/user` and personal details removed. File names follow `<HookEvent>[-variant].json`.
 
 | Fixture | Origin |
 |---|---|

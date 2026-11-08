@@ -1,5 +1,2 @@
 node_modules/
 .DS_Store
-spikes/**/out/
-.claude/settings.local.json
-.superpowers/
