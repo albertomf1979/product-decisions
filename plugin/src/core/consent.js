@@ -18,6 +18,12 @@ this repository. The full record goes to its own branch only if every place this
 repository pushes to is verified private. In a public repository it stays on this
 machine. Nothing is pushed if you activate with --no-push.
 
+Automatic summaries: after a session closes, the plugin asks claude, with your
+own login, to draft decision records and phase notes from that session. This
+uses your plan's limits or bills your API key, within the project's caps (by
+default 10 runs a day and $1.00 per run). Turn it off for yourself with
+--no-llm.
+
 Change your mind at any time with: product-decisions pause`;
 
 const CONSENT_SHA = crypto.createHash('sha256').update(CONSENT).digest('hex');

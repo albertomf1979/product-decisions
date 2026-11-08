@@ -159,6 +159,10 @@ const pushReport = (on) => console.log(on
   ? 'Publishing from this machine is on.'
   : 'Publishing from this machine is off: everything stays here. Run init again without --no-push to turn it on.');
 
+const llmReport = (enabled) => console.log(enabled
+  ? "LLM synthesis is on for you, within the project's caps."
+  : 'LLM synthesis is off for you (--no-llm).');
+
 /** Activates capture for this person on this clone, after explicit consent. */
 async function init({ cwd, flags }) {
   const location = requireRepo(cwd);
@@ -169,7 +173,7 @@ async function init({ cwd, flags }) {
     console.log(existing.paused
       ? 'product-decisions is active in this repository, but paused. Run: product-decisions resume'
       : 'product-decisions is already active in this repository.');
-    let state = { ...existing, main_root: location.mainRoot, push_enabled: !flags.noPush };
+    let state = { ...existing, main_root: location.mainRoot, push_enabled: !flags.noPush, llm_enabled: !flags.noLlm };
     if (!consentIsCurrent(existing)) {
       // The text changed since this person accepted it: nothing is published until they accept the new one.
       console.log('The consent text has changed since you accepted it.\n');
@@ -188,6 +192,7 @@ async function init({ cwd, flags }) {
       report(await declareOrJoin(location, flags, existing.actor_name));
     }
     pushReport(state.push_enabled);
+    llmReport(state.llm_enabled);
     return 0;
   }
 
@@ -215,6 +220,7 @@ async function init({ cwd, flags }) {
     salt: crypto.randomBytes(32).toString('hex'),
     consent_sha: CONSENT_SHA,
     push_enabled: !flags.noPush,
+    llm_enabled: !flags.noLlm,
     main_root: location.mainRoot,
   };
   // The consent record comes first: if it cannot be written, nothing is activated.
@@ -230,6 +236,7 @@ async function init({ cwd, flags }) {
   // Publishing the declaration lets teammates join it instead of declaring their own.
   if (!result.joined && state.push_enabled) await publishNow(location);
   pushReport(state.push_enabled);
+  llmReport(state.llm_enabled);
   console.log('Activated. Sessions here are captured from now on, including any already open.');
   return 0;
 }

@@ -301,7 +301,10 @@ test('the first init creates the docs branch with config.json and nothing on cod
   const before = { head: git(root, 'rev-parse', 'HEAD'), branches: git(root, 'branch', '--list') };
   const result = runCli(['init', '--yes', '--language', 'es', '--track', 'PRD.md'], { cwd: root });
   assert.equal(result.status, 0, result.stderr);
-  assert.deepEqual(docsConfig(root), { schema_version: 1, folder: 'product-decisions', language: 'es', tracked_documents: ['PRD.md'], publish: { raw: 'auto' }, redact_patterns: [] });
+  assert.deepEqual(docsConfig(root), {
+    schema_version: 1, folder: 'product-decisions', language: 'es', tracked_documents: ['PRD.md'], publish: { raw: 'auto' }, redact_patterns: [],
+    llm: { enabled: true, engine: 'auto', model: 'sonnet', max_input_chars: 400000, max_runs_per_day: 10, max_budget_usd: 1 },
+  });
   assert.equal(git(root, 'rev-parse', 'HEAD'), before.head);
   assert.deepEqual(git(root, 'branch', '--format=%(refname:short)').split('\n').sort(), ['main', 'product-decisions/docs']);
   assert.equal(git(root, 'status', '--porcelain'), '');
@@ -496,4 +499,24 @@ test('status warns when transcripts are newer than the last captured event', (t)
   assert.match(String(status.capture_hint), /after the last captured event/);
   const quiet = JSON.parse(runCli(['status', '--json'], { cwd: root, env: { HOME: path.join(base, 'empty-home'), USERPROFILE: path.join(base, 'empty-home'), CLAUDE_CONFIG_DIR: '' } }).stdout);
   assert.equal(quiet.capture_hint, null);
+});
+
+test('init --no-llm turns synthesis off for this person, and init without it turns it back on', (t) => {
+  const { root } = repo(t);
+  assert.equal(runCli(['init', '--yes', '--no-llm'], { cwd: root }).status, 0);
+  assert.equal(readLocal(common(root)).llm_enabled, false);
+  assert.equal(init(root).status, 0);
+  assert.equal(readLocal(common(root)).llm_enabled, true);
+});
+
+test('init explains the LLM choice it recorded', (t) => {
+  const { root } = repo(t);
+  assert.match(runCli(['init', '--yes', '--no-llm'], { cwd: root }).stdout, /LLM synthesis is off for you \(--no-llm\)\./);
+  assert.match(init(root).stdout, /LLM synthesis is on for you, within the project's caps\./);
+});
+
+test('the usage text lists --no-llm and --llm', () => {
+  const { stdout } = runCli(['--help']);
+  assert.match(stdout, /init \[--yes\] \[--no-push\] \[--no-llm\]/);
+  assert.match(stdout, /sync \[--no-push\] \[--llm\]/);
 });

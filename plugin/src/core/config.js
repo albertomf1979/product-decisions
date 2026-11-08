@@ -12,6 +12,7 @@ const DEFAULT_CONFIG = Object.freeze({
   tracked_documents: [],
   publish: { raw: 'auto' },
   redact_patterns: [],
+  llm: Object.freeze({ enabled: true, engine: 'auto', model: 'sonnet', max_input_chars: 400000, max_runs_per_day: 10, max_budget_usd: 1.00 }),
 });
 
 const copyPath = (commonDir) => path.join(storeDir(commonDir), 'config.json');
@@ -20,9 +21,14 @@ const copyPath = (commonDir) => path.join(storeDir(commonDir), 'config.json');
 function readConfig(commonDir) {
   try {
     const stored = JSON.parse(fs.readFileSync(copyPath(commonDir), 'utf8'));
-    return { ...DEFAULT_CONFIG, ...stored, publish: { ...DEFAULT_CONFIG.publish, ...(stored.publish || {}) } };
+    return {
+      ...DEFAULT_CONFIG,
+      ...stored,
+      publish: { ...DEFAULT_CONFIG.publish, ...(stored.publish || {}) },
+      llm: { ...DEFAULT_CONFIG.llm, ...(stored.llm && typeof stored.llm === 'object' ? stored.llm : {}) },
+    };
   } catch {
-    return { ...DEFAULT_CONFIG, publish: { ...DEFAULT_CONFIG.publish } };
+    return { ...DEFAULT_CONFIG, publish: { ...DEFAULT_CONFIG.publish }, llm: { ...DEFAULT_CONFIG.llm } };
   }
 }
 
@@ -41,6 +47,33 @@ function isSafeRelativePath(value) {
   if (typeof value !== 'string' || value === '' || value.length > 500) return false;
   if (value.includes('\0') || value.includes('\\') || /^[A-Za-z]:/.test(value) || value.startsWith('/')) return false;
   return value.split('/').every((part) => part !== '' && part !== '.' && part !== '..') && !value.split('/').includes('.git');
+}
+
+const isInt = (v, min, max) => Number.isInteger(v) && v >= min && v <= max;
+
+/** What each LLM setting may hold. A shared config cannot raise spending without bound. */
+const LLM_RULES = {
+  enabled: (v) => typeof v === 'boolean',
+  engine: (v) => ['auto', 'claude'].includes(v),
+  model: (v) => typeof v === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:\[\]-]{0,63}$/.test(v),
+  max_input_chars: (v) => isInt(v, 10000, 2000000),
+  max_runs_per_day: (v) => isInt(v, 0, 100),
+  max_budget_usd: (v) => typeof v === 'number' && Number.isFinite(v) && v > 0 && v <= 100,
+};
+
+/** @returns {{ llm: object, bad: boolean }} Each bad field keeps the fallback's value. */
+function sanitizeLlm(input, fallback) {
+  const base = { ...DEFAULT_CONFIG.llm, ...(fallback && typeof fallback === 'object' ? fallback : {}) };
+  if (input === undefined) return { llm: base, bad: false };
+  if (input === null || typeof input !== 'object' || Array.isArray(input)) return { llm: base, bad: true };
+  let bad = false;
+  const llm = { ...base };
+  for (const [key, valid] of Object.entries(LLM_RULES)) {
+    if (input[key] === undefined) continue;
+    if (valid(input[key])) llm[key] = input[key];
+    else bad = true;
+  }
+  return { llm, bad };
 }
 
 function compiles(pattern) {
@@ -80,6 +113,9 @@ function sanitizeConfig(input, fallback = DEFAULT_CONFIG) {
   const raw = value.publish && typeof value.publish === 'object' ? value.publish.raw : undefined;
   if (['auto', 'always'].includes(raw)) config.publish.raw = raw;
   else if (raw !== undefined) rejected.push('publish');
+  const { llm, bad } = sanitizeLlm(value.llm, fallback.llm);
+  config.llm = llm;
+  if (bad) rejected.push('llm');
   return { config, rejected };
 }
 

@@ -13,6 +13,7 @@ const path = require('node:path');
  * @property {boolean} paused
  * @property {string | null} paused_at
  * @property {string[]} redact_patterns
+ * @property {boolean} [llm_enabled] False when this person turned LLM synthesis off (--no-llm)
  */
 
 /** @returns {string} The plugin's private directory inside the Git common directory. */
