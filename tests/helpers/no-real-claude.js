@@ -12,5 +12,7 @@ const NO_CLAUDE = path.join(__dirname, 'no-claude-in-tests');
 process.env.PRODUCT_DECISIONS_CLAUDE_BIN = NO_CLAUDE;
 const NO_CODEX = path.join(__dirname, 'no-codex-in-tests');
 process.env.PRODUCT_DECISIONS_CODEX_BIN = NO_CODEX;
+// status reads the first line of recent Codex rollouts: never the developer's own.
+process.env.CODEX_HOME = path.join(__dirname, 'no-codex-home-in-tests');
 
 module.exports = { NO_CLAUDE, NO_CODEX };

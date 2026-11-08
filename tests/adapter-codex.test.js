@@ -90,7 +90,26 @@ test('missing or null fields never throw', () => {
   assert.equal(normalize({ ...load('Stop'), transcript_path: null }).transcriptPath, null);
 });
 
-test('Codex has no project folder variable, and finds no sessions until Task 5', () => {
+test('Codex has no project folder variable', () => {
   assert.equal(projectDir({ CLAUDE_PROJECT_DIR: '/x' }), null);
-  assert.equal(latestSessionAt('/home/user/project', {}), null);
+});
+
+test('latestSessionAt reads only the first line of recent rollouts and matches this folder', (t) => {
+  const os = require('node:os');
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pd-codex-home-')));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const day = path.join(home, 'sessions', '2026', '11', '08');
+  fs.mkdirSync(day, { recursive: true });
+  const project = path.join(home, 'project');
+  const write = (name, cwd, at) => {
+    const file = path.join(day, name);
+    fs.writeFileSync(file, `${JSON.stringify({ type: 'session_meta', payload: { id: name, cwd } })}\n${JSON.stringify({ type: 'response_item', payload: { secret: 'NEVER-READ' } })}\n`);
+    fs.utimesSync(file, at / 1000, at / 1000);
+  };
+  write('rollout-a.jsonl', path.join(project, 'src'), Date.parse('2026-11-08T10:00:00Z'));
+  write('rollout-b.jsonl', path.join(home, 'elsewhere'), Date.parse('2026-11-08T11:00:00Z'));
+  fs.writeFileSync(path.join(day, 'rollout-broken.jsonl'), '{ not json');
+  assert.equal(latestSessionAt(project, { CODEX_HOME: home }), '2026-11-08T10:00:00.000Z');
+  assert.equal(latestSessionAt(path.join(home, 'nothing-here'), { CODEX_HOME: home }), null);
+  assert.equal(latestSessionAt(project, { CODEX_HOME: path.join(home, 'missing') }), null);
 });

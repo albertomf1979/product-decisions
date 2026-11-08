@@ -159,6 +159,8 @@ const pushReport = (on) => console.log(on
   ? 'Publishing from this machine is on.'
   : 'Publishing from this machine is off: everything stays here. Run init again without --no-push to turn it on.');
 
+const CODEX_NOTE = "Using Codex? Review this plugin's hooks once in /hooks (and again after each update), or nothing is captured. Codex support is pending review.";
+
 const llmReport = (enabled) => console.log(enabled
   ? "LLM synthesis is on for you, within the project's caps."
   : 'LLM synthesis is off for you (--no-llm).');
@@ -193,6 +195,7 @@ async function init({ cwd, flags }) {
     }
     pushReport(state.push_enabled);
     llmReport(state.llm_enabled);
+    console.log(CODEX_NOTE);
     return 0;
   }
 
@@ -237,6 +240,7 @@ async function init({ cwd, flags }) {
   if (!result.joined && state.push_enabled) await publishNow(location);
   pushReport(state.push_enabled);
   llmReport(state.llm_enabled);
+  console.log(CODEX_NOTE);
   console.log('Activated. Sessions here are captured from now on, including any already open.');
   return 0;
 }

@@ -158,14 +158,25 @@ function sealStats(store, machine) {
 }
 
 /** Makes silently missing capture visible: transcripts newer than anything captured. */
-function captureHint(location, tools) {
-  const { latestSessionAt } = require('../adapters/claude-code.js');
-  const latest = latestSessionAt(location.mainRoot);
-  if (!latest) return null;
-  const captured = Object.values(tools).map((t) => t.last_event_at).filter(Boolean).map((at) => Date.parse(at));
-  const last = captured.length ? Math.max(...captured) : 0;
-  if (Date.parse(latest) - last <= HINT_MARGIN_MS) return null;
-  return 'A Claude Code session ran here after the last captured event. If capture should be on, check that the plugin is installed and enabled for this folder.';
+const HINTS = {
+  'claude-code': 'A Claude Code session ran here after the last captured event. If capture should be on, check that the plugin is installed and enabled for this folder.',
+  codex: 'A Codex session ran here after the last captured event. Codex skips plugin hooks until you review them in /hooks, and again after each plugin update. Codex support is pending review.',
+};
+
+/** One hint per tool that ran a session here after the last event captured from it. */
+function captureHints(location, tools) {
+  const hints = [];
+  for (const tool of ['claude-code', 'codex']) {
+    const latest = require(`../adapters/${tool}.js`).latestSessionAt(location.mainRoot);
+    if (!latest) continue;
+    const captured = tool === 'claude-code'
+      ? Object.values(tools).map((t) => t.last_event_at)
+      : [tools.codex && tools.codex.last_event_at];
+    const times = captured.filter(Boolean).map((at) => Date.parse(at));
+    const last = times.length ? Math.max(...times) : 0;
+    if (Date.parse(latest) - last > HINT_MARGIN_MS) hints.push(HINTS[tool]);
+  }
+  return hints;
 }
 
 function collect(location) {
@@ -207,7 +218,8 @@ function collect(location) {
     seals: sealStats(store, state && state.machine),
     latency: latencyStats(store),
     errors: errorStats(store),
-    capture_hint: state && state.activated ? captureHint(location, tools) : null,
+    capture_hints: state && state.activated ? captureHints(location, tools) : [],
+    capture_hint: state && state.activated ? captureHints(location, tools)[0] || null : null,
     llm: state && state.activated ? require('../worker/synthesis.js').llmStatus(location.commonDir) : null,
     runtime: { cli_node: process.version, git: gitVersion() },
   };
@@ -252,7 +264,7 @@ function render(status) {
     lines.push(`Hook time: p50 ${status.latency.p50} ms, p95 ${status.latency.p95} ms (${status.latency.count} runs)`);
   }
   lines.push(`Errors: ${status.errors.count}${status.errors.last_at ? `, last at ${status.errors.last_at}` : ''}`);
-  if (status.capture_hint) lines.push(`Note: ${status.capture_hint}`);
+  for (const hint of status.capture_hints || []) lines.push(`Note: ${hint}`);
   lines.push(`This command runs on Node ${status.runtime.cli_node}, Git ${status.runtime.git}`);
   return lines;
 }

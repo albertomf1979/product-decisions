@@ -181,7 +181,7 @@ test('status --json reports the agreed shape', (t) => {
   const result = runCli(['status', '--json'], { cwd: root });
   assert.equal(result.status, 0, result.stderr);
   const status = JSON.parse(result.stdout);
-  assert.deepEqual(Object.keys(status).sort(), ['activated', 'actor', 'capture_hint', 'errors', 'latency', 'llm', 'paused', 'project', 'publication', 'repo', 'runtime', 'seals', 'store', 'tools']);
+  assert.deepEqual(Object.keys(status).sort(), ['activated', 'actor', 'capture_hint', 'capture_hints', 'errors', 'latency', 'llm', 'paused', 'project', 'publication', 'repo', 'runtime', 'seals', 'store', 'tools']);
   assert.equal(status.repo.root, root);
   assert.equal(status.activated, true);
   assert.equal(status.paused, false);
@@ -615,4 +615,25 @@ test('a full cycle with synthesis leaves the project untouched', (t) => {
   const fake = fakeClaude(root, seedSession(root));
   assert.equal(runCli(['sync', '--no-push', '--llm'], { cwd: root, env: fake.env }).status, 0);
   assert.deepEqual({ head: git(root, 'rev-parse', 'HEAD'), porcelain: git(root, 'status', '--porcelain'), branches: git(root, 'branch', '--format=%(refname:short)') }, before);
+});
+
+test('status warns when a Codex session ran here after the last captured Codex event', (t) => {
+  const { root } = repo(t);
+  init(root);
+  const codexHome = path.join(root, '..', 'codex-home');
+  const day = path.join(codexHome, 'sessions', '2026', '11', '08');
+  fs.mkdirSync(day, { recursive: true });
+  fs.writeFileSync(path.join(day, 'rollout-x.jsonl'), `${JSON.stringify({ type: 'session_meta', payload: { cwd: root } })}\n`);
+  const { stdout } = runCli(['status'], { cwd: root, env: { CODEX_HOME: codexHome } });
+  assert.match(stdout, /A Codex session ran here after the last captured event\. Codex skips plugin hooks until you review them in \/hooks, and again after each plugin update\. Codex support is pending review\./);
+  const json = JSON.parse(runCli(['status', '--json'], { cwd: root, env: { CODEX_HOME: codexHome } }).stdout);
+  assert.ok(json.capture_hints.some((h) => /Codex session ran here/.test(h)));
+  assert.equal(json.capture_hint, json.capture_hints[0]);
+  const quiet = JSON.parse(runCli(['status', '--json'], { cwd: root, env: { CODEX_HOME: path.join(root, '..', 'no-codex') } }).stdout);
+  assert.ok(!quiet.capture_hints.some((h) => /Codex/.test(h)));
+});
+
+test('init explains the Codex hook review', (t) => {
+  const { root } = repo(t);
+  assert.match(init(root).stdout, /Using Codex\? Review this plugin's hooks once in \/hooks \(and again after each update\), or nothing is captured\. Codex support is pending review\./);
 });

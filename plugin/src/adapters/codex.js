@@ -100,8 +100,69 @@ function pathsTouched(payload) {
   return [...new Set(found.map((value) => path.resolve(base, value)))];
 }
 
-/** When Codex last ran a session in this folder. Task 5 of M4 fills this in. */
-function latestSessionAt() {
+const MAX_ROLLOUTS = 20;
+const FIRST_LINE_BYTES = 64 * 1024;
+
+function rollouts(dir) {
+  const fs = require('node:fs');
+  const found = [];
+  const walk = (d) => {
+    let entries;
+    try {
+      entries = fs.readdirSync(d, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const full = path.join(d, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (/^rollout-.*\.jsonl$/.test(entry.name)) {
+        try {
+          found.push({ file: full, mtimeMs: fs.statSync(full).mtimeMs });
+        } catch {
+          // Gone meanwhile.
+        }
+      }
+    }
+  };
+  walk(dir);
+  return found.sort((a, b) => b.mtimeMs - a.mtimeMs).slice(0, MAX_ROLLOUTS);
+}
+
+/** The folder a rollout was started in, from its first line (session_meta) only. */
+function rolloutCwd(file) {
+  const fs = require('node:fs');
+  let fd;
+  try {
+    fd = fs.openSync(file, 'r');
+    const buffer = Buffer.alloc(FIRST_LINE_BYTES);
+    const read = fs.readSync(fd, buffer, 0, FIRST_LINE_BYTES, 0);
+    const first = JSON.parse(buffer.subarray(0, read).toString('utf8').split('\n')[0]);
+    const cwd = first && (first.payload ? first.payload.cwd : first.cwd);
+    return typeof cwd === 'string' ? cwd : null;
+  } catch {
+    return null;
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+}
+
+/**
+ * When Codex last ran a session in this folder. Reads only the first line of the 20 most
+ * recent rollout files: the rollout format "isn't a stable interface", so this is
+ * pending review, and anything unexpected gives null.
+ *
+ * @returns {string | null}
+ */
+function latestSessionAt(folder, env = process.env) {
+  const home = env.CODEX_HOME || path.join(require('node:os').homedir(), '.codex');
+  const root = path.resolve(folder);
+  for (const { file, mtimeMs } of rollouts(path.join(home, 'sessions'))) {
+    const cwd = rolloutCwd(file);
+    if (!cwd) continue;
+    const rel = path.relative(root, path.resolve(cwd));
+    if (rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))) return new Date(mtimeMs).toISOString();
+  }
   return null;
 }
 
