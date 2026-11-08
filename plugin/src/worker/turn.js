@@ -115,7 +115,9 @@ async function runTurn(job, { commonDir, now = new Date() }) {
     }
   }
 
-  const tail = job.transcriptPath ? readTranscriptTail(job.transcriptPath) : null;
+  // The transcript formats are tool-specific and unstable; only Claude Code's is read (CAP-13).
+  const readsTranscript = job.tool === 'claude-code' && Boolean(job.transcriptPath);
+  const tail = readsTranscript ? readTranscriptTail(job.transcriptPath) : null;
   if (tail && tail.model) {
     const meta = readSessionMeta(commonDir, job.tool, job.sessionId) || {};
     writeSessionMeta(commonDir, job.tool, job.sessionId, {
@@ -126,7 +128,7 @@ async function runTurn(job, { commonDir, now = new Date() }) {
     }
   }
 
-  if (job.transcriptPath) {
+  if (readsTranscript) {
     const roots = [locateStore(commonDir, state)?.mainRoot, location && location.worktreeRoot].filter(Boolean);
     enrichFromTranscript({ job, commonDir, file, events: readEvents(file), state, extra, home, git, roots });
   }

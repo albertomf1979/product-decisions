@@ -380,3 +380,17 @@ test('a finished subagent gets its model from its meta file, once', async (t) =>
   assert.equal(sub.length, 1);
   assert.equal(sub[0].payload.model, 'claude-opus-5-5');
 });
+
+test('transcript enrichment never runs for a Codex session', async (t) => {
+  const root = setup(t);
+  const file = rawFilePath(common(root), 'codex', 's1', 'abcd1234');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const event = buildEvent(
+    { eventType: 'user_prompt', actorType: 'user', agent: { name: 'main' }, payload: { prompt: 'hi' } },
+    { tool: 'codex', sessionId: 's1', actorName: 'Test Person', git: null, sources: [], summary: 'hi' },
+  );
+  fs.appendFileSync(file, `${JSON.stringify(event)}\n`);
+  await runTurn({ kind: 'turn', tool: 'codex', sessionId: 's1', cwd: root, transcriptPath: localEnrich(root) }, { commonDir: common(root) });
+  const derived = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((e) => e.payload && e.payload.source === 'transcript');
+  assert.deepEqual(derived, []);
+});

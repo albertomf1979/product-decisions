@@ -282,3 +282,20 @@ test('a session with nothing to label gets no annotations file', () => {
   const quiet = sessionData([ev('session_start', { actorType: 'user', payload: { source: 'startup' } }), ev('user_prompt', { actorType: 'user', payload: { prompt: 'hi' } })], context);
   assert.ok(![...renderIndexes([quiet], [], DEFAULT_CONFIG).keys()].some((k) => k.startsWith('annotations/')));
 });
+
+test('the Codex coverage note says what hooks miss and that Codex support is pending review', () => {
+  assert.match(tr('en', 'coverage_codex'), /hosted tools such as web search/i);
+  assert.match(tr('en', 'coverage_codex'), /pending review/);
+  assert.match(tr('es', 'coverage_codex'), /pendiente de revisión/);
+});
+
+test('PostModelRequest token usage appears in the chronicle as model use', () => {
+  n = 0;
+  const events = [
+    ev('session_start', { actorType: 'user', payload: { source: 'startup' }, tool: 'codex' }),
+    ev('model_usage', { payload: { model: 'gpt-5-codex', status: 'ok', token_usage: { input_tokens: 10, output_tokens: 2 } }, tool: 'codex' }),
+  ];
+  const chronicle = [...renderSession(events, DEFAULT_CONFIG, context).values()][0];
+  assert.match(chronicle, /Model in use: gpt-5-codex/);
+  assert.match(chronicle, /pending review/);
+});
