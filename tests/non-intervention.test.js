@@ -8,7 +8,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { makeRepo, activate } = require('./helpers/repo.js');
-const { factor, runHook, runHookAsync, assertSilent, fixtureNames, fixture, storeOf, copyPlugin } = require('./helpers/hook-runner.js');
+const { factor, runHook, runHookAsync, assertSilent, fixtureNames, fixture, storeOf, copyPlugin, codexFixture, codexFixtureNames, capturedEvents } = require('./helpers/hook-runner.js');
 
 const asJson = (name, cwd) => JSON.stringify(fixture(name, { cwd }));
 const eventOf = (name) => fixture(name).hook_event_name;
@@ -144,4 +144,37 @@ test('SessionEnd with stdin that never closes exits 0 within 1.2 seconds', async
   const result = await runHookAsync({ cwd: root, event: 'SessionEnd', keepStdinOpen: true });
   assertSilent(result);
   assert(result.ms < 1200 * factor, `took ${result.ms.toFixed(0)} ms`);
+});
+
+// Codex (M4): stdout on Stop, SubagentStop, and Interrupt would be invalid there, so silence matters even more.
+test('every Codex fixture, active, inactive, and outside a repository, leaves the hook silent with exit 0', (t) => {
+  const { root } = activeRepo(t);
+  const inactive = makeRepo();
+  t.after(inactive.cleanup);
+  const outside = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pd-outside-')));
+  t.after(() => fs.rmSync(outside, { recursive: true, force: true }));
+  for (const cwd of [root, inactive.root, outside]) {
+    for (const name of codexFixtureNames()) {
+      const payload = codexFixture(name, { cwd });
+      assertSilent(runHook({ stdin: JSON.stringify(payload), cwd, tool: 'codex', event: payload.hook_event_name }), `${name} in ${cwd}`);
+    }
+  }
+});
+
+test('malformed input and a 9 MiB tool result leave the Codex hook silent', (t) => {
+  const { root } = activeRepo(t);
+  assertSilent(runHook({ stdin: '{not json', cwd: root, tool: 'codex', event: 'Stop' }));
+  const huge = codexFixture('PostToolUse-shell.json', { cwd: root, tool_response: 'x'.repeat(9 * 1024 * 1024) });
+  assertSilent(runHook({ stdin: JSON.stringify(huge), cwd: root, tool: 'codex', event: 'PostToolUse' }));
+});
+
+test('a Codex event is recorded as codex, never as claude-code', (t) => {
+  const { root } = activeRepo(t);
+  const payload = codexFixture('UserPromptSubmit.json', { cwd: root });
+  assertSilent(runHook({ stdin: JSON.stringify(payload), cwd: root, tool: 'codex', event: 'UserPromptSubmit' }));
+  const events = capturedEvents(root);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].tool, 'codex');
+  assert.equal(events[0].actor.type, 'user');
+  assert.equal(events[0].model, 'gpt-5-codex');
 });

@@ -68,3 +68,42 @@ test('every registered event has a mapping in the adapter', () => {
   const { normalize } = require('../plugin/src/adapters/claude-code.js');
   for (const event of REGISTERED) assert.notEqual(normalize({ hook_event_name: event }), null, event);
 });
+
+// Codex (M4). Built from the documentation of 2026-11-08: pending review.
+const CODEX_EVENTS = ['SessionStart', 'SessionEnd', 'UserPromptSubmit', 'PostToolUse', 'SubagentStart', 'SubagentStop', 'Stop', 'Interrupt', 'PreCompact', 'PostCompact', 'PostModelRequest'];
+
+test('the Codex hook file registers exactly CAP-1 for Codex and nothing CAP-2 forbids', () => {
+  const { hooks } = read('plugin', 'hooks', 'codex.json');
+  assert.deepEqual(Object.keys(hooks).sort(), [...CODEX_EVENTS].sort());
+  for (const forbidden of ['PreToolUse', 'PermissionRequest', 'PreModelRequest']) assert.ok(!(forbidden in hooks), forbidden);
+});
+
+test('every Codex hook runs our script as codex with its own event name, synchronously, with a short timeout', () => {
+  for (const [event, groups] of Object.entries(read('plugin', 'hooks', 'codex.json').hooks)) {
+    assert.equal(groups.length, 1, event);
+    assert.equal(groups[0].matcher, undefined, event);
+    const [hook] = groups[0].hooks;
+    assert.equal(hook.type, 'command');
+    assert.equal(hook.command, `node "$PLUGIN_ROOT/scripts/hook.js" codex ${event}`);
+    assert.ok(hook.timeout > 0 && hook.timeout <= 5, event);
+    assert.equal(hook.async, undefined, event);
+  }
+});
+
+test("neither tool can load the other tool's hooks", () => {
+  const codexManifest = read('plugin', '.codex-plugin', 'plugin.json');
+  assert.equal(codexManifest.hooks, './hooks/codex.json');
+  assert.equal(codexManifest.name, read('plugin', '.claude-plugin', 'plugin.json').name);
+  for (const groups of Object.values(read('plugin', 'hooks', 'hooks.json').hooks)) {
+    for (const group of groups) for (const hook of group.hooks) assert.equal(hook.args[1], 'claude-code');
+  }
+  assert.equal(read('plugin', '.claude-plugin', 'plugin.json').hooks, undefined);
+});
+
+test('the Codex marketplace points at the plugin folder', () => {
+  const market = read('.agents', 'plugins', 'marketplace.json');
+  assert.equal(market.name, 'product-decisions');
+  assert.equal(market.plugins.length, 1);
+  assert.equal(market.plugins[0].name, 'product-decisions');
+  assert.deepEqual(market.plugins[0].source, { source: 'local', path: './plugin' });
+});

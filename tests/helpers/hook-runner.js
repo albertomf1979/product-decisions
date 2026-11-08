@@ -60,6 +60,18 @@ function assertSilent(result, label = '') {
 const fixtureNames = () => fs.readdirSync(FIXTURES).filter((f) => f.endsWith('.json'));
 
 /** Loads a fixture as an object with some fields replaced. */
+const CODEX_FIXTURES = path.join(__dirname, '..', 'fixtures', 'codex');
+
+/** A Codex fixture (constructed from the documentation, pending review). */
+function codexFixture(name, overrides = {}) {
+  return { ...JSON.parse(fs.readFileSync(path.join(CODEX_FIXTURES, name), 'utf8')), ...overrides };
+}
+
+/** Every Codex fixture except PreToolUse, which Codex never sends to this plugin. */
+function codexFixtureNames() {
+  return fs.readdirSync(CODEX_FIXTURES).filter((n) => n.endsWith('.json') && n !== 'PreToolUse.json').sort();
+}
+
 function fixture(name, overrides = {}) {
   return { ...JSON.parse(fs.readFileSync(path.join(FIXTURES, name), 'utf8')), ...overrides };
 }
@@ -100,5 +112,7 @@ function copyPlugin(base, name) {
 }
 
 module.exports = {
+  codexFixture,
+  codexFixtureNames,
   HOOK, factor, runHook, runHookAsync, assertSilent, fixtureNames, fixture, walk, storeOf, capturedEvents, storeText, recordText, copyPlugin,
 };
