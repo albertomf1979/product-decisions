@@ -54,7 +54,7 @@ const isInt = (v, min, max) => Number.isInteger(v) && v >= min && v <= max;
 /** What each LLM setting may hold. A shared config cannot raise spending without bound. */
 const LLM_RULES = {
   enabled: (v) => typeof v === 'boolean',
-  engine: (v) => ['auto', 'claude'].includes(v),
+  engine: (v) => ['auto', 'claude', 'codex'].includes(v),
   model: (v) => typeof v === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:\[\]-]{0,63}$/.test(v),
   max_input_chars: (v) => isInt(v, 10000, 2000000),
   max_runs_per_day: (v) => isInt(v, 0, 100),

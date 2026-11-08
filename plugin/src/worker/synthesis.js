@@ -24,6 +24,7 @@ const { OUTPUT_SCHEMA, checkOutput } = require('../synth/llm/schema.js');
 const { adrFiles } = require('../synth/llm/adr.js');
 const { noteFiles } = require('../synth/llm/notes.js');
 const { resolveClaude, runClaude } = require('../synth/llm/engine.js');
+const { resolveCodex, runCodex } = require('../synth/llm/engine-codex.js');
 
 /**
  * Failures that would repeat if retried as they are, and that may have spent quota: they
@@ -173,12 +174,18 @@ function existingDecisions({ location, commonDir, state, config }) {
   return out;
 }
 
-/** The engine for the person's own claude, in an emptied work directory inside the store. */
-async function defaultEngine({ prompt, system, schema, config, commonDir }) {
-  const bin = resolveClaude();
-  if (!bin) return { ok: false, reason: 'missing', detail: 'claude not found' };
+/**
+ * The person's own agent, in an emptied work directory inside the store. With engine
+ * "auto" it is the agent that ran the session (PRD LLM-11): claude -p for Claude Code,
+ * codex exec for Codex (unverified, pending review).
+ */
+async function defaultEngine({ prompt, system, schema, config, commonDir, tool }) {
+  const name = config.llm.engine === 'auto' ? (tool === 'codex' ? 'codex' : 'claude') : config.llm.engine;
+  const bin = name === 'codex' ? resolveCodex() : resolveClaude();
+  if (!bin) return { ok: false, reason: 'missing', detail: `${name} not found`, engine: name };
   const workDir = path.join(storeDir(commonDir), 'tmp', 'synth');
   fs.rmSync(workDir, { recursive: true, force: true });
+  if (name === 'codex') return runCodex({ bin, prompt, system, schema, model: config.llm.model, workDir });
   return runClaude({ bin, prompt, system, schema, model: config.llm.model, maxBudgetUsd: config.llm.max_budget_usd, workDir });
 }
 
@@ -227,7 +234,7 @@ async function runSynthesis({ commonDir, force = false, now = new Date(), engine
       const timer = setInterval(refresh, refreshEveryMs);
       let outcome;
       try {
-        outcome = await engine({ prompt: chunk.text, system: systemPrompt(lang), schema: OUTPUT_SCHEMA, config, commonDir });
+        outcome = await engine({ prompt: chunk.text, system: systemPrompt(lang), schema: OUTPUT_SCHEMA, config, commonDir, tool: r.tool });
       } finally {
         clearInterval(timer);
       }
@@ -274,7 +281,7 @@ async function runSynthesis({ commonDir, force = false, now = new Date(), engine
       // Any failure stops the run: a systematic cause must not spend a run on every session.
       if (REPEATING.has(reason)) llm.failed[r.key] = { from: chunk.from, reason, at };
       writeLlmState(commonDir, llm);
-      stopped = { reason };
+      stopped = reason === 'missing' && outcome && outcome.engine ? { reason, engine: outcome.engine } : { reason };
       break outer;
     }
   }

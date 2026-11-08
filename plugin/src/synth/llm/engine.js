@@ -12,7 +12,7 @@ const { spawn } = require('node:child_process');
 const SESSION_VARS = [
   'CLAUDECODE', 'CLAUDE_CODE_SIMPLE', 'CLAUDE_CODE_SAFE_MODE', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_SESSION_ID',
   'CLAUDE_CODE_CHILD_SESSION', 'CLAUDE_CODE_HOST_SESSION_ID', 'CLAUDE_CODE_SESSION_ATTENDED',
-  'CLAUDE_CODE_MESSAGING_SOCKET', 'CLAUDE_CODE_MESSAGING_TOKEN', 'CLAUDE_PID',
+  'CLAUDE_CODE_MESSAGING_SOCKET', 'CLAUDE_CODE_MESSAGING_TOKEN', 'CLAUDE_PID', 'CODEX_THREAD_ID',
 ];
 
 /**
@@ -51,24 +51,27 @@ function fromShim(file) {
 const asCommand = (file) => (/\.cmd$/i.test(file) ? fromShim(file) : { command: file, prefix: [] });
 
 /**
- * Finds `claude`: PRODUCT_DECISIONS_CLAUDE_BIN first, then PATH (`claude.exe`, then
- * `claude.cmd` on Windows).
+ * Finds an agent's executable: its override variable first, then PATH (`<name>.exe`,
+ * then `<name>.cmd` on Windows).
  *
  * @returns {{ command: string, prefix: string[] } | null}
  */
-function resolveClaude({ env = process.env, platform = process.platform } = {}) {
-  const override = env.PRODUCT_DECISIONS_CLAUDE_BIN;
+function resolveCommand(name, overrideVar, { env = process.env, platform = process.platform } = {}) {
+  const override = env[overrideVar];
   if (override) return isFile(override) ? asCommand(override) : null;
   const windows = platform === 'win32';
   const dirs = String(env.PATH ?? env.Path ?? '').split(windows ? ';' : ':').filter(Boolean);
-  for (const name of windows ? ['claude.exe', 'claude.cmd'] : ['claude']) {
+  for (const file of windows ? [`${name}.exe`, `${name}.cmd`] : [name]) {
     for (const dir of dirs) {
-      const file = path.join(dir, name);
-      if (isFile(file)) return asCommand(file);
+      const full = path.join(dir, file);
+      if (isFile(full)) return asCommand(full);
     }
   }
   return null;
 }
+
+/** Finds `claude`: PRODUCT_DECISIONS_CLAUDE_BIN first, then PATH. */
+const resolveClaude = (options) => resolveCommand('claude', 'PRODUCT_DECISIONS_CLAUDE_BIN', options);
 
 const AUTH = /not logged in|log ?in|authenticat|credential|api key|401|403/i;
 
@@ -143,4 +146,4 @@ function runClaude({ bin, prompt, system, schema, model, maxBudgetUsd, workDir, 
   });
 }
 
-module.exports = { resolveClaude, childEnv, runClaude, SESSION_VARS };
+module.exports = { resolveClaude, resolveCommand, childEnv, runClaude, SESSION_VARS };

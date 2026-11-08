@@ -11,6 +11,8 @@ const { readConfig, writeConfigCopy } = require('../plugin/src/core/config.js');
 const { runTurn } = require('../plugin/src/worker/turn.js');
 const { runSynthesis, pendingSessions, llmStatus } = require('../plugin/src/worker/synthesis.js');
 const { makeRepo } = require('./helpers/repo.js');
+const { installFakeClaude } = require('./helpers/fake-claude.js');
+const { installFakeCodex } = require('./helpers/fake-codex.js');
 const { runCli } = require('./helpers/cli-runner.js');
 
 const common = (root) => path.join(root, '.git');
@@ -234,4 +236,29 @@ test('the lock is refreshed while the engine runs', async (t) => {
   });
   await runSynthesis({ commonDir: common(root), engine, refresh: () => { refreshed += 1; }, refreshEveryMs: 20 });
   assert.ok(refreshed >= 1);
+});
+
+test('auto picks codex for a Codex session and claude for a Claude Code session', async (t) => {
+  const root = setup(t);
+  talk(root, 's1');
+  await close(root, 's1');
+  const file = rawFilePath(common(root), 'codex', 'cx1', readLocal(common(root)).machine);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.appendFileSync(file, [['user_prompt', { prompt: 'codex ask' }, 'user'], ['agent_response', { last_assistant_message: 'ok' }, 'llm']].map(([eventType, payload, actorType]) => JSON.stringify(buildEvent(
+    { eventType, actorType, llmName: 'codex', agent: { name: 'main' }, payload },
+    { tool: 'codex', sessionId: 'cx1', actorName: 'Test Person', git: null, sources: [], summary: eventType },
+  ))).join('\n') + '\n');
+  await runTurn({ kind: 'close', tool: 'codex', sessionId: 'cx1', cwd: root, transcriptPath: null }, { commonDir: common(root) });
+  const bins = path.join(root, '..', 'fake-bins');
+  const logs = { claude: path.join(bins, 'claude.jsonl'), codex: path.join(bins, 'codex.jsonl') };
+  const saved = { ...process.env };
+  t.after(() => { for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k]; Object.assign(process.env, saved); });
+  Object.assign(process.env, {
+    PRODUCT_DECISIONS_CLAUDE_BIN: installFakeClaude(path.join(bins, 'claude')), FAKE_CLAUDE_LOG: logs.claude, FAKE_CLAUDE_MODE: 'ok',
+    PRODUCT_DECISIONS_CODEX_BIN: installFakeCodex(path.join(bins, 'codex')), FAKE_CODEX_LOG: logs.codex, FAKE_CODEX_MODE: 'ok',
+  });
+  const result = await runSynthesis({ commonDir: common(root) });
+  assert.equal(result.runs, 2);
+  assert.match(fs.readFileSync(logs.codex, 'utf8'), /codex ask/);
+  assert.ok(!fs.readFileSync(logs.claude, 'utf8').includes('codex ask'));
 });

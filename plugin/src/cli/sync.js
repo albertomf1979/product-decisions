@@ -13,7 +13,10 @@ const PHRASES = {
 /** What sync says about LLM synthesis after an explicit --llm. */
 function llmMessage(synthesis) {
   if (synthesis.status === 'no_consent') return 'LLM synthesis needs the current consent. Run init to read and accept it.';
-  if (synthesis.status === 'stopped' && synthesis.error.reason === 'missing') return 'LLM synthesis could not start: claude was not found. Set PRODUCT_DECISIONS_CLAUDE_BIN to its path.';
+  if (synthesis.status === 'stopped' && synthesis.error.reason === 'missing') {
+    const engine = synthesis.error.engine || 'claude';
+    return `LLM synthesis could not start: ${engine} was not found. Set PRODUCT_DECISIONS_${engine.toUpperCase()}_BIN to its path.`;
+  }
   if (synthesis.status === 'stopped') return `LLM synthesis stopped: ${synthesis.error.reason}. It will be retried after the next session.`;
   return `LLM synthesis: ${synthesis.runs} runs, ${synthesis.decisions} decisions, ${synthesis.notes} phase notes, ${synthesis.rejected} items rejected.`;
 }
