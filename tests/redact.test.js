@@ -254,5 +254,8 @@ test('the encoded home is masked too', () => {
   assert.equal(maskHome('xwininfo -root', '/root'), 'xwininfo -root');
   assert.equal(maskHome('/tmp/claude-0/-root-project/x', '/root'), '/tmp/claude-0/~-project/x');
   assert.equal(maskHome('-Users-ana-repo', '/Users/ana'), '~-repo');
+  // A folder that already held the encoded home, encoded again (found at the M6 clean install).
+  assert.equal(maskHome('~/.claude/projects/-private-tmp-claude-501--Users-ana-Documents-x/s.jsonl', '/Users/ana'), '~/.claude/projects/-private-tmp-claude-501-~-Documents-x/s.jsonl');
+  assert.equal(maskHome('git rebase --root', '/root'), 'git rebase --root');
   assert.equal(maskHome('C:\\Users\\ana\\.claude\\projects\\C--Users-ana-repo\\s.jsonl', 'C:\\Users\\ana'), '~\\.claude\\projects\\~-repo\\s.jsonl');
 });
