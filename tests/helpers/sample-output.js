@@ -107,7 +107,7 @@ function renderSample() {
     '',
     fence(pick('timeline/')),
     '',
-    'A decision record, in `decisions/`. Only LLM synthesis writes these, and every one cites the events that prove it:',
+    'A decision record, in `decisions/`. Only LLM synthesis writes these, and every one cites the events it rests on:',
     '',
     fence(pick('decisions/ADR-')),
   ].join('\n');

@@ -22,11 +22,19 @@ test('the sample output in the README is what the renderers produce', () => {
   assert.equal(between(readme, '<!-- sample:start -->', '<!-- sample:end -->').trim(), renderSample().trim());
 });
 
+test('the README never claims more than the code does', () => {
+  for (const claim of [/Nothing in your working tree changes/, /needs no model and costs nothing/, /cites the events that prove it/, /Codex sessions are synthesized only on/]) {
+    assert.doesNotMatch(readme, claim);
+  }
+});
+
 test('the README covers what the PRD asks of it', () => {
   for (const phrase of [
     /npx github:albertomf1979\/product-decisions#v1\.0\.0 init/, /pending review/, /30 days/, /teleport/,
     /does not prove authorship/, /rotate/i, /personal data/, /product-decisions\/docs/, /claude\.ai/, /model turn/,
     /re-approve/, /Windows/, /sync --llm/, /daily cap/, /MIT/, /becomes public/, /no legal advice/,
+    // The review of M6: what the runbook and init really do.
+    /init --push/, /--llm/, /stops publishing/, /\.git\/info\/exclude/, /keeps your earlier choices/,
   ]) assert.match(readme, phrase);
 });
 
@@ -42,6 +50,6 @@ test('the README documents every command the CLI has, and the wrappers that exis
   assert.ok(commands.length >= 7);
   for (const command of commands) assert.match(readme, new RegExp(`^\\| \`${command}[ \`]`, 'm'), `command ${command}`);
   for (const name of ['status', 'verify']) {
-    assert.ok(readme.includes(`/product-decisions:${name}`) && readme.includes(`$product-decisions-${name}`), `wrapper ${name}`);
+    assert.ok(readme.includes(`/product-decisions:${name}`) && readme.includes(`$product-decisions:${name}`), `wrapper ${name}`);
   }
 });
