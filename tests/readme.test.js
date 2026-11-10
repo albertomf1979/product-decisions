@@ -7,7 +7,8 @@ const path = require('node:path');
 const { renderSample } = require('./helpers/sample-output.js');
 
 const ROOT = path.join(__dirname, '..');
-const readme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8');
+// A Windows checkout may turn every line ending into CRLF.
+const readme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8').replace(/\r\n/g, '\n');
 const { version } = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
 
 const between = (text, start, end) => {
@@ -36,7 +37,7 @@ test('the README names the version in package.json wherever it pins one', () => 
 });
 
 test('the README documents every command the CLI has, and the wrappers that exist', () => {
-  const cli = fs.readFileSync(path.join(ROOT, 'plugin', 'src', 'cli', 'index.js'), 'utf8');
+  const cli = fs.readFileSync(path.join(ROOT, 'plugin', 'src', 'cli', 'index.js'), 'utf8').replace(/\r\n/g, '\n');
   const commands = [...between(cli, 'const COMMANDS = {', '};').matchAll(/^\s+(\w+): \(\)/gm)].map((m) => m[1]);
   assert.ok(commands.length >= 7);
   for (const command of commands) assert.match(readme, new RegExp(`^\\| \`${command}[ \`]`, 'm'), `command ${command}`);

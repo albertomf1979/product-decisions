@@ -126,8 +126,10 @@ const frontmatter = (text) => {
   const match = /^---\n([\s\S]*?)\n---\n/.exec(text);
   return match ? Object.fromEntries(match[1].split('\n').map((line) => [line.slice(0, line.indexOf(':')).trim(), line.slice(line.indexOf(':') + 1).trim()])) : {};
 };
+// A Windows checkout may turn every line ending into CRLF.
+const readText = (file) => fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
 const skill = (file) => {
-  const text = fs.readFileSync(file, 'utf8');
+  const text = readText(file);
   return { file, text, meta: frontmatter(text), body: text.replace(/^---\n[\s\S]*?\n---\n/, ''), folder: path.relative(PLUGIN, path.dirname(file)).split(path.sep).join('/') };
 };
 
@@ -136,7 +138,7 @@ test('every skill in the plugin is explicit-only in both tools', () => {
   assert.equal(skills.length, 4);
   for (const { file, meta } of skills) {
     assert.equal(meta['disable-model-invocation'], 'true', `${file}: Claude Code would add it to the model's context`);
-    const policy = fs.readFileSync(path.join(path.dirname(file), 'agents', 'openai.yaml'), 'utf8');
+    const policy = readText(path.join(path.dirname(file), 'agents', 'openai.yaml'));
     assert.match(policy, /^policy:\n {2}allow_implicit_invocation: false\n?$/m, `${file}: Codex would add it to the model's context`);
   }
 });
