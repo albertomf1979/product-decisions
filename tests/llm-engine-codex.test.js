@@ -15,7 +15,8 @@ const SCHEMA = { type: 'object', properties: { decisions: { type: 'array' } }, r
 
 function setup(t) {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pd-codex-')));
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  // On Windows a process the test just killed can hold its folder for a moment.
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }));
   const bin = resolveCodex({ env: { PRODUCT_DECISIONS_CODEX_BIN: installFakeCodex(path.join(dir, 'bin')) } });
   const log = path.join(dir, 'log.jsonl');
   const env = (mode, extra = {}) => ({ ...process.env, FAKE_CODEX_MODE: mode, FAKE_CODEX_LOG: log, CODEX_THREAD_ID: 'parent-thread', ...extra });

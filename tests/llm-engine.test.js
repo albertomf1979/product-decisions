@@ -12,7 +12,8 @@ const SCHEMA = { type: 'object', properties: { decisions: { type: 'array' } }, r
 
 function setup(t) {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pd-engine-')));
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  // On Windows a process the test just killed can hold its folder for a moment.
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }));
   const fake = installFakeClaude(path.join(dir, 'bin'));
   const log = path.join(dir, 'log.jsonl');
   const bin = resolveClaude({ env: { PRODUCT_DECISIONS_CLAUDE_BIN: fake } });
