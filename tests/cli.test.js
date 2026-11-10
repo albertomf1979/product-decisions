@@ -501,23 +501,25 @@ test('status warns when transcripts are newer than the last captured event', (t)
   assert.equal(quiet.capture_hint, null);
 });
 
-test('init --no-llm turns synthesis off for this person, and init without it turns it back on', (t) => {
+test('init --no-llm turns synthesis off for this person, and only init --llm turns it back on', (t) => {
   const { root } = repo(t);
   assert.equal(runCli(['init', '--yes', '--no-llm'], { cwd: root }).status, 0);
   assert.equal(readLocal(common(root)).llm_enabled, false);
   assert.equal(init(root).status, 0);
+  assert.equal(readLocal(common(root)).llm_enabled, false);
+  assert.equal(runCli(['init', '--yes', '--llm'], { cwd: root }).status, 0);
   assert.equal(readLocal(common(root)).llm_enabled, true);
 });
 
 test('init explains the LLM choice it recorded', (t) => {
   const { root } = repo(t);
   assert.match(runCli(['init', '--yes', '--no-llm'], { cwd: root }).stdout, /LLM synthesis is off for you \(--no-llm\)\./);
-  assert.match(init(root).stdout, /LLM synthesis is on for you, within the project's caps\./);
+  assert.match(runCli(['init', '--yes', '--llm'], { cwd: root }).stdout, /LLM synthesis is on for you, within the project's caps\./);
 });
 
 test('the usage text lists --no-llm and --llm', () => {
   const { stdout } = runCli(['--help']);
-  assert.match(stdout, /init \[--yes\] \[--no-push\] \[--no-llm\]/);
+  assert.match(stdout, /init \[--yes\] \[--push\|--no-push\] \[--llm\|--no-llm\]/);
   assert.match(stdout, /sync \[--no-push\] \[--llm\]/);
 });
 
@@ -652,4 +654,32 @@ test('status counts imported events per tool', (t) => {
   assert.match(stdout, /claude-code: 2 sessions, 12 captured events \(\+\d+ added, 11 imported\)/);
   const json = JSON.parse(runCli(['status', '--json'], { cwd: root }).stdout);
   assert.equal(json.tools['claude-code'].imported, 11);
+});
+
+test('init keeps your earlier push and LLM choices unless you change them', (t) => {
+  const { root } = repo(t);
+  const choices = () => {
+    const state = readLocal(common(root));
+    return [state.push_enabled, state.llm_enabled];
+  };
+  assert.equal(runCli(['init', '--yes', '--no-push', '--no-llm'], { cwd: root }).status, 0);
+  assert.deepEqual(choices(), [false, false]);
+  assert.equal(runCli(['init', '--yes'], { cwd: root }).status, 0);
+  assert.deepEqual(choices(), [false, false], 'running init again changes nothing you did not ask for');
+  assert.equal(runCli(['init', '--yes', '--no-llm'], { cwd: root }).status, 0);
+  assert.deepEqual(choices(), [false, false]);
+  assert.equal(runCli(['init', '--yes', '--push'], { cwd: root }).status, 0);
+  assert.deepEqual(choices(), [true, false]);
+  assert.equal(runCli(['init', '--yes', '--llm'], { cwd: root }).status, 0);
+  assert.deepEqual(choices(), [true, true]);
+  const both = runCli(['init', '--yes', '--push', '--no-push'], { cwd: root });
+  assert.equal(both.status, 1);
+  assert.match(both.stderr, /Choose either --push or --no-push/);
+});
+
+test('a first init still publishes and synthesizes unless told not to', (t) => {
+  const { root } = repo(t);
+  assert.equal(runCli(['init', '--yes'], { cwd: root }).status, 0);
+  const state = readLocal(common(root));
+  assert.deepEqual([state.push_enabled, state.llm_enabled], [true, true]);
 });

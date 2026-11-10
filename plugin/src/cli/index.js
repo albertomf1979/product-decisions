@@ -6,7 +6,7 @@ const { UsageError } = require('./shared.js');
 const USAGE = `Usage: product-decisions <command>
 
 Commands:
-  init [--yes] [--no-push] [--no-llm] [--language en|es] [--folder <name>] [--track <path>]...
+  init [--yes] [--push|--no-push] [--llm|--no-llm] [--language en|es] [--folder <name>] [--track <path>]...
                    Activate capture for you, and declare or join the project
   status [--json]  Show what is active and what has been captured
   pause            Stop capture for you on this clone
@@ -29,13 +29,14 @@ const COMMANDS = {
 };
 
 async function main(argv) {
-  const flags = { yes: false, json: false, noPush: false, noLlm: false, llm: false, dryRun: false, session: null, track: [] };
+  const flags = { yes: false, json: false, push: false, noPush: false, noLlm: false, llm: false, dryRun: false, session: null, track: [] };
   const positional = [];
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--yes') flags.yes = true;
     else if (arg === '--json') flags.json = true;
     else if (arg === '--no-push') flags.noPush = true;
+    else if (arg === '--push') flags.push = true;
     else if (arg === '--no-llm') flags.noLlm = true;
     else if (arg === '--llm') flags.llm = true;
     else if (arg === '--dry-run') flags.dryRun = true;

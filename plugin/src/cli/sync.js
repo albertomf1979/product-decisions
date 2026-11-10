@@ -6,8 +6,14 @@ const { UsageError, requireRepo } = require('./shared.js');
 const project = require('./project.js');
 
 const PHRASES = {
-  docs: { published: 'Documents published.', local: 'Documents committed on this machine only.', pending: 'Documents could not be pushed yet; they will be retried.' },
-  raw: { published: 'Raw record published.', local: 'Raw record kept on this machine.', pending: 'Raw record could not be pushed yet; it will be retried.' },
+  docs: {
+    published: 'Documents published.', local: 'Documents committed on this machine only.', pending: 'Documents could not be pushed yet; they will be retried.',
+    stopped: 'product-decisions/docs was deleted on the remote, so it is no longer published. Run init --push to publish again.',
+  },
+  raw: {
+    published: 'Raw record published.', local: 'Raw record kept on this machine.', pending: 'Raw record could not be pushed yet; it will be retried.',
+    stopped: 'The raw record was deleted on the remote, so it is no longer published. Run init --push to publish again.',
+  },
 };
 
 /** What sync says about LLM synthesis after an explicit --llm. */
@@ -61,7 +67,7 @@ async function sync({ cwd, flags }) {
   else if (flags.noPush) console.log('Nothing was pushed (--no-push).');
   else if (!mayPush(state)) {
     console.log(consentIsCurrent(state)
-      ? 'Publishing from this machine is off, so nothing was pushed. Run init without --no-push to turn it on.'
+      ? 'Publishing from this machine is off, so nothing was pushed. Run init --push to turn it on.'
       : 'The consent text has changed, so nothing was pushed. Run init to read and accept it.');
   } else console.log('No remote: nothing is shared.');
   for (const warning of result.warnings) {

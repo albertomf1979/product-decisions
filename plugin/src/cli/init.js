@@ -157,16 +157,21 @@ function report(result) {
 
 const pushReport = (on) => console.log(on
   ? 'Publishing from this machine is on.'
-  : 'Publishing from this machine is off: everything stays here. Run init again without --no-push to turn it on.');
+  : 'Publishing from this machine is off: everything stays here. Run init --push to turn it on.');
 
 const CODEX_NOTE = "Using Codex? Review this plugin's hooks once in /hooks (and again after each update), or nothing is captured. Codex support, including native Windows, is pending review.";
 
 const llmReport = (enabled) => console.log(enabled
   ? "LLM synthesis is on for you, within the project's caps."
-  : 'LLM synthesis is off for you (--no-llm).');
+  : 'LLM synthesis is off for you (--no-llm). Run init --llm to turn it on.');
+
+/** A choice made at an earlier init stands until the person changes it with a flag. */
+const choice = (on, off, previous) => (on ? true : off ? false : previous !== false);
 
 /** Activates capture for this person on this clone, after explicit consent. */
 async function init({ cwd, flags }) {
+  if (flags.push && flags.noPush) throw new UsageError('Choose either --push or --no-push.');
+  if (flags.llm && flags.noLlm) throw new UsageError('Choose either --llm or --no-llm.');
   const location = requireRepo(cwd);
   checkFlags(location, flags);
   const existing = readLocal(location.commonDir);
@@ -175,7 +180,14 @@ async function init({ cwd, flags }) {
     console.log(existing.paused
       ? 'product-decisions is active in this repository, but paused. Run: product-decisions resume'
       : 'product-decisions is already active in this repository.');
-    let state = { ...existing, main_root: location.mainRoot, push_enabled: !flags.noPush, llm_enabled: !flags.noLlm };
+    let state = {
+      ...existing,
+      main_root: location.mainRoot,
+      push_enabled: choice(flags.push, flags.noPush, existing.push_enabled),
+      llm_enabled: choice(flags.llm, flags.noLlm, existing.llm_enabled),
+    };
+    // Only an explicit --push publishes again a ref someone deleted on the remote.
+    if (flags.push) require('../worker/publish.js').resumePublishing(location.commonDir);
     if (!consentIsCurrent(existing)) {
       // The text changed since this person accepted it: nothing is published until they accept the new one.
       console.log('The consent text has changed since you accepted it.\n');
@@ -233,6 +245,7 @@ async function init({ cwd, flags }) {
     payload: { statement: CONSENT, method },
   });
   writeLocal(location.commonDir, state);
+  if (flags.push) require('../worker/publish.js').resumePublishing(location.commonDir);
   const result = await declareOrJoin(location, flags, state.actor_name);
   report(result);
   require('../worker/render.js').refreshFolder({ commonDir: location.commonDir });

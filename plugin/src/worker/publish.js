@@ -67,19 +67,60 @@ function parentsFor(cwd, local, remoteTip) {
   return [local, remoteTip];
 }
 
+const STOPPED = 'stopped.json';
+const SEEN = 'remote-refs.json';
+const SHORT = { [DOCS_REF]: 'docs', [RAW_REF]: 'raw' };
+
+/**
+ * Refs this machine has seen on the remote. Git's own tracking ref is not enough: a
+ * `git push origin :ref` from this clone deletes it too.
+ */
+const seenOnRemote = (commonDir) => readJson(stateFile(commonDir, SEEN), {});
+function markSeen(commonDir, ref) {
+  if (!seenOnRemote(commonDir)[ref]) writeJson(stateFile(commonDir, SEEN), { ...seenOnRemote(commonDir), [ref]: true });
+}
+
+/** The refs whose publication stopped because someone deleted them on the remote. */
+const stoppedRefs = (commonDir) => readJson(stateFile(commonDir, STOPPED), {});
+
+/** Publishing a stopped ref again is the person's decision: init clears this. */
+function resumePublishing(commonDir) {
+  fs.rmSync(stateFile(commonDir, STOPPED), { force: true });
+  fs.rmSync(stateFile(commonDir, SEEN), { force: true });
+}
+
+/** Exit 2 means the remote answered and has no such ref; anything else proves nothing. */
+const deletedOnRemote = (cwd, remote, ref) => git(['ls-remote', '--exit-code', remote.name, ref], { cwd, allowFail: true }).status === 2;
+
 /**
  * Commits what `build` produces onto a ref and pushes it, merging with the remote and
  * retrying when someone else published first.
  *
- * @returns {Promise<'local' | 'published' | 'pending'>}
+ * A ref this machine had fetched before and the remote no longer has was deleted on
+ * purpose, as the leaked-secret runbook does (PRD PRIV-6). Pushing the local copy would
+ * bring everything back, so publication of that ref stops until the person runs init.
+ *
+ * @returns {Promise<'local' | 'published' | 'pending' | 'stopped'>}
  */
-async function publishRef({ cwd, commonDir, remote, ref, build, authorName, message, beforePush }) {
+async function publishRef({ cwd, commonDir, remote: given, ref, build, authorName, message, beforePush }) {
   const tracking = TRACKING[ref];
+  let remote = given;
+  let outcome = remote && stoppedRefs(commonDir)[ref] ? 'stopped' : null;
+  if (outcome) remote = null;
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
     let remoteTip = null;
     if (remote) {
-      git(['fetch', '--quiet', '--no-tags', remote.name, `+${ref}:${tracking}`], { cwd, allowFail: true });
-      remoteTip = readRef(cwd, tracking);
+      const fetched = git(['fetch', '--quiet', '--no-tags', remote.name, `+${ref}:${tracking}`], { cwd, allowFail: true });
+      const known = readRef(cwd, tracking) || seenOnRemote(commonDir)[ref];
+      if (fetched.status !== 0 && known && deletedOnRemote(cwd, remote, ref)) {
+        writeJson(stateFile(commonDir, STOPPED), { ...stoppedRefs(commonDir), [ref]: formatTimestamp() });
+        git(['update-ref', '-d', tracking], { cwd, allowFail: true });
+        remote = null;
+        outcome = 'stopped';
+      } else {
+        remoteTip = readRef(cwd, tracking);
+        if (fetched.status === 0 && remoteTip) markSeen(commonDir, ref);
+      }
     }
     const local = readRef(cwd, ref);
     const parents = parentsFor(cwd, local, remoteTip);
@@ -94,12 +135,13 @@ async function publishRef({ cwd, commonDir, remote, ref, build, authorName, mess
     }
     // An unchanged tree returns the parent without moving the ref.
     if (readRef(cwd, ref) !== commit) git(['update-ref', ref, commit], { cwd });
-    if (!remote) return 'local';
+    if (!remote) return outcome || 'local';
     if (commit === remoteTip) return 'published';
     if (beforePush) await beforePush({ ref, attempt });
     const pushed = git(['push', '--no-verify', '--quiet', remote.name, `${ref}:${ref}`], { cwd, allowFail: true });
     if (pushed.status === 0) {
       git(['update-ref', tracking, commit], { cwd });
+      markSeen(commonDir, ref);
       return 'published';
     }
   }
@@ -199,9 +241,10 @@ async function publish({ commonDir, push = true, visibilityOf = checkVisibility,
     docs_pending: result.docs === 'pending',
     raw_pending: result.raw === 'pending',
     warnings: result.warnings,
+    stopped: Object.keys(stoppedRefs(commonDir)).map((ref) => SHORT[ref] || ref).sort(),
     last_published_at: result.docs === 'published' ? formatTimestamp(now) : previous.last_published_at || null,
   });
   return result;
 }
 
-module.exports = { publish, remoteOf, pushUrls };
+module.exports = { publish, remoteOf, pushUrls, resumePublishing };

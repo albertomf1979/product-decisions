@@ -214,6 +214,7 @@ function collect(location) {
       raw_pending: Boolean(publication.raw_pending),
       warnings: publication.warnings || [],
       last_published_at: publication.last_published_at || null,
+      stopped: Object.keys(readJson(path.join(store, 'state', 'stopped.json'), {})).map((ref) => (ref.endsWith('/docs') ? 'docs' : ref.endsWith('/raw') ? 'raw' : ref)).sort(),
       published_bytes: publishedBytes(location.mainRoot),
     },
     seals: sealStats(store, state && state.machine),
@@ -247,7 +248,8 @@ function render(status) {
     lines.push('Publication: no remote, so nothing is shared.');
   } else {
     const pending = [pub.docs_pending && 'documents', pub.raw_pending && 'raw record'].filter(Boolean);
-    lines.push(`Publication: ${pub.remote}, visibility ${pub.visibility || 'not checked yet'}, last published ${pub.last_published_at || 'never'}${pending.length ? `; pending: ${pending.join(' and ')}` : ''}`);
+    const stopped = pub.stopped.length ? `; stopped: ${pub.stopped.join(' and ')} (deleted on the remote). Run init --push to publish again` : '';
+    lines.push(`Publication: ${pub.remote}, visibility ${pub.visibility || 'not checked yet'}, last published ${pub.last_published_at || 'never'}${pending.length ? `; pending: ${pending.join(' and ')}` : ''}${stopped}`);
   }
   for (const warning of pub.warnings) {
     if (warning === 'raw_ref_public') lines.push('Warning: this repository is public and holds a published raw record.');

@@ -284,3 +284,67 @@ test('someone who declared separately adopts the team config when publishing', a
   assert.equal(readConfig(common(other)).language, 'es');
   assert.equal(JSON.parse(require('node:child_process').execFileSync('git', ['show', `${DOCS_REF}:config.json`], { cwd: remote, encoding: 'utf8' })).language, 'es');
 });
+
+test('a ref deleted on the remote is not pushed back, and publishing it waits for init --push', async (t) => {
+  const { root, remote } = team(t);
+  session(root, 's1', 'a prompt that leaked a secret');
+  const first = await publish({ commonDir: common(root), visibilityOf: visibility('private') });
+  assert.deepEqual([first.docs, first.raw], ['published', 'published']);
+  git(root, 'push', '-q', 'origin', `:${RAW_REF}`, `:${DOCS_REF}`);
+
+  const after = await publish({ commonDir: common(root), visibilityOf: visibility('private') });
+  assert.deepEqual([after.docs, after.raw], ['stopped', 'stopped']);
+  assert.equal(readRef(remote, DOCS_REF), null);
+  assert.equal(readRef(remote, RAW_REF), null);
+  session(root, 's2');
+  const later = await publish({ commonDir: common(root), visibilityOf: visibility('private') });
+  assert.deepEqual([later.docs, later.raw], ['stopped', 'stopped']);
+  assert.equal(readRef(remote, DOCS_REF), null, 'a new session does not bring it back');
+  assert.equal(readRef(remote, RAW_REF), null);
+
+  assert.equal(runCli(['init', '--yes'], { cwd: root }).status, 0);
+  const still = await publish({ commonDir: common(root), visibilityOf: visibility('private') });
+  assert.deepEqual([still.docs, still.raw], ['stopped', 'stopped'], 'renewing consent alone does not publish again');
+  assert.equal(runCli(['init', '--yes', '--push'], { cwd: root }).status, 0);
+  const resumed = await publish({ commonDir: common(root), visibilityOf: visibility('private') });
+  assert.deepEqual([resumed.docs, resumed.raw], ['published', 'published']);
+});
+
+test("a teammate's clone does not push a deleted ref back either", async (t) => {
+  const { root, remote, join } = team(t);
+  session(root, 's1');
+  await publish({ commonDir: common(root), visibilityOf: visibility('private') });
+  const bob = join('bob');
+  await publish({ commonDir: common(bob), visibilityOf: visibility('private') });
+  git(root, 'push', '-q', 'origin', `:${RAW_REF}`, `:${DOCS_REF}`);
+  const result = await publish({ commonDir: common(bob), visibilityOf: visibility('private') });
+  assert.deepEqual([result.docs, result.raw], ['stopped', 'stopped']);
+  assert.equal(readRef(remote, DOCS_REF), null);
+  assert.equal(readRef(remote, RAW_REF), null);
+});
+
+test('sync and status say that publishing stopped, and how to resume it', async (t) => {
+  const { root } = team(t);
+  session(root, 's1');
+  await publish({ commonDir: common(root), visibilityOf: visibility('private') });
+  git(root, 'push', '-q', 'origin', `:${DOCS_REF}`);
+  const sync = runCli(['sync'], { cwd: root });
+  assert.equal(sync.status, 0, sync.stderr);
+  assert.match(sync.stdout, /product-decisions\/docs was deleted on the remote, so it is no longer published\. Run init --push to publish again\./);
+  assert.match(runCli(['status'], { cwd: root }).stdout, /stopped: docs \(deleted on the remote\)/);
+  assert.deepEqual(JSON.parse(runCli(['status', '--json'], { cwd: root }).stdout).publication.stopped, ['docs']);
+});
+
+test('an unreachable remote is not a deletion', async (t) => {
+  const { root, remote } = team(t);
+  session(root, 's1');
+  await publish({ commonDir: common(root), visibilityOf: visibility('private') });
+  fs.renameSync(remote, `${remote}.away`);
+  session(root, 's1b');
+  const offline = await publish({ commonDir: common(root), visibilityOf: visibility('private') });
+  assert.equal(offline.docs, 'pending');
+  fs.renameSync(`${remote}.away`, remote);
+  session(root, 's2');
+  const back = await publish({ commonDir: common(root), visibilityOf: visibility('private') });
+  assert.deepEqual([back.docs, back.raw], ['published', 'published']);
+});
