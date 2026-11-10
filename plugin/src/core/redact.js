@@ -150,6 +150,8 @@ const homePatterns = new Map();
  * record. Only at a path boundary: /Users/ana must not touch /Users/anabel. Also its
  * encoded form, as Claude Code names project folders (/Users/ana → -Users-ana), which
  * shows up in transcript and temporary paths such as /private/tmp/claude-501/-Users-ana-x.
+ * The encoded form is masked only where a path segment begins, so a short home such as
+ * /u never turns `git push -u` into `git push ~`.
  */
 function maskHome(text, home) {
   if (!home || home.length < 2) return text;
@@ -157,7 +159,7 @@ function maskHome(text, home) {
     const forms = [...new Set([home, home.replace(/\\/g, '/')])].map(escapeRegExp);
     const encoded = escapeRegExp(home.replace(/[^A-Za-z0-9]/g, '-'));
     homePatterns.set(home, new RegExp(
-      `(?:${forms.join('|')})(?=$|[\\\\/\\s"'<>:;,)\\]}])|(?<=^|[\\\\/\\s"'(\\[{<=:])${encoded}(?=$|[-\\\\/\\s"'<>:;,)\\]}])`,
+      `(?:${forms.join('|')})(?=$|[\\\\/\\s"'<>:;,)\\]}])|(?<=^|[\\\\/])${encoded}(?=$|[-\\\\/\\s"'<>:;,)\\]}])`,
       'g',
     ));
   }

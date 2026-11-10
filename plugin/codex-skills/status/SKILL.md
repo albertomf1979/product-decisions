@@ -1,5 +1,5 @@
 ---
-name: product-decisions-status
+name: status
 description: Show what product-decisions has captured in this repository, and whether capture is active. Runs the CLI and changes nothing.
 disable-model-invocation: true
 ---

@@ -248,6 +248,11 @@ test('the encoded home is masked too', () => {
   assert.equal(maskHome('/private/tmp/claude-501/-Users-ana-Documents/s/x', '/Users/ana'), '/private/tmp/claude-501/~-Documents/s/x');
   assert.equal(maskHome('~/.claude/projects/-Users-ana/s.jsonl', '/Users/ana'), '~/.claude/projects/~/s.jsonl');
   assert.equal(maskHome('/tmp/-Users-anabel-x and /tmp/x-Users-ana-y', '/Users/ana'), '/tmp/-Users-anabel-x and /tmp/x-Users-ana-y');
-  assert.equal(maskHome('cd -Users-ana', '/Users/ana'), 'cd ~');
+  // Only where a path can begin: a short home must not eat command flags.
+  assert.equal(maskHome('cd -Users-ana', '/Users/ana'), 'cd -Users-ana');
+  assert.equal(maskHome('git push -u origin main', '/u'), 'git push -u origin main');
+  assert.equal(maskHome('xwininfo -root', '/root'), 'xwininfo -root');
+  assert.equal(maskHome('/tmp/claude-0/-root-project/x', '/root'), '/tmp/claude-0/~-project/x');
+  assert.equal(maskHome('-Users-ana-repo', '/Users/ana'), '~-repo');
   assert.equal(maskHome('C:\\Users\\ana\\.claude\\projects\\C--Users-ana-repo\\s.jsonl', 'C:\\Users\\ana'), '~\\.claude\\projects\\~-repo\\s.jsonl');
 });

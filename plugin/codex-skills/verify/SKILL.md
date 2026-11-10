@@ -1,5 +1,5 @@
 ---
-name: product-decisions-verify
+name: verify
 description: Check that this repository's product-decisions record has not been altered. Runs the CLI and changes nothing.
 disable-model-invocation: true
 ---

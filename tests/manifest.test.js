@@ -144,8 +144,9 @@ test('every skill in the plugin is explicit-only in both tools', () => {
 test('the wrappers are status and verify, and each runs only its own command', () => {
   const skills = skillFiles().map(skill);
   assert.deepEqual(skills.map((s) => [s.folder, s.meta.name]), [
-    ['codex-skills/product-decisions-status', 'product-decisions-status'],
-    ['codex-skills/product-decisions-verify', 'product-decisions-verify'],
+    // Codex prefixes a plugin's skills with its name: $product-decisions:status, as in Claude Code.
+    ['codex-skills/status', 'status'],
+    ['codex-skills/verify', 'verify'],
     ['skills/status', 'status'],
     ['skills/verify', 'verify'],
   ]);
