@@ -1,6 +1,6 @@
 {
   "name": "product-decisions",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Passive traceability for products built with Claude Code and Codex.",
   "private": true,
   "type": "commonjs",
