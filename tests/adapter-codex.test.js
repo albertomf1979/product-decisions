@@ -76,9 +76,11 @@ test('an MCP tool name gives its server and tool', () => {
 });
 
 test('apply_patch paths come from its file headers', () => {
-  assert.deepEqual(pathsTouched(load('PostToolUse-apply_patch')), ['/home/user/project/PRD.md', '/home/user/project/src/new.js']);
-  assert.deepEqual(pathsTouched({ ...load('PostToolUse-apply_patch'), tool_input: '*** Begin Patch\n*** Delete File: old.md\n*** End Patch' }), ['/home/user/project/old.md']);
-  assert.deepEqual(pathsTouched(load('PostToolUse-shell')), ['/home/user/project']);
+  // Resolved as this system resolves them: D:\home\user\project on Windows.
+  const abs = (p) => require('node:path').resolve(p);
+  assert.deepEqual(pathsTouched(load('PostToolUse-apply_patch')), [abs('/home/user/project/PRD.md'), abs('/home/user/project/src/new.js')]);
+  assert.deepEqual(pathsTouched({ ...load('PostToolUse-apply_patch'), tool_input: '*** Begin Patch\n*** Delete File: old.md\n*** End Patch' }), [abs('/home/user/project/old.md')]);
+  assert.deepEqual(pathsTouched(load('PostToolUse-shell')), [abs('/home/user/project')]);
   assert.deepEqual(pathsTouched({}), []);
 });
 

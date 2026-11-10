@@ -272,7 +272,7 @@ test('imported ranges are synthesized only on an explicit run', async (t) => {
   const dir = path.join(claudeHome, 'projects', root.replace(/[^A-Za-z0-9]/g, '-'));
   fs.mkdirSync(dir, { recursive: true });
   const fixtureText = fs.readFileSync(path.join(__dirname, 'fixtures', 'claude-code', 'transcript-import.jsonl'), 'utf8');
-  fs.writeFileSync(path.join(dir, 'imported-1.jsonl'), fixtureText.split('/home/user/project').join(root));
+  fs.writeFileSync(path.join(dir, 'imported-1.jsonl'), fixtureText.split('/home/user/project').join(JSON.stringify(root).slice(1, -1)));
   const imported = runCli(['import'], { cwd: root, env: { CLAUDE_CONFIG_DIR: claudeHome } });
   assert.equal(imported.status, 0, imported.stderr);
 

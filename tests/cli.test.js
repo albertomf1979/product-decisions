@@ -647,7 +647,7 @@ test('status counts imported events per tool', (t) => {
   const dir = path.join(claudeHome, 'projects', root.replace(/[^A-Za-z0-9]/g, '-'));
   fs.mkdirSync(dir, { recursive: true });
   const text = fs.readFileSync(path.join(__dirname, 'fixtures', 'claude-code', 'transcript-import.jsonl'), 'utf8');
-  fs.writeFileSync(path.join(dir, 'imported-1.jsonl'), text.split('/home/user/project').join(root));
+  fs.writeFileSync(path.join(dir, 'imported-1.jsonl'), text.split('/home/user/project').join(JSON.stringify(root).slice(1, -1)));
   assert.equal(runCli(['import'], { cwd: root, env: { CLAUDE_CONFIG_DIR: claudeHome } }).status, 0);
   hook(root, 'UserPromptSubmit.json');
   const { stdout } = runCli(['status'], { cwd: root });

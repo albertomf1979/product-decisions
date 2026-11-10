@@ -67,6 +67,8 @@ test('resolveCodex honours PRODUCT_DECISIONS_CODEX_BIN, then PATH, and runs an n
   fs.mkdirSync(win);
   fs.writeFileSync(path.join(win, 'codex.cmd'), shimFor('node_modules\\@openai\\codex\\bin\\codex.js'));
   assert.deepEqual(resolveCodex({ env: { Path: win }, platform: 'win32' }), { command: process.execPath, prefix: [path.join(win, 'node_modules', '@openai', 'codex', 'bin', 'codex.js')] });
+  // A POSIX PATH cannot hold a Windows absolute path (C:\…): checked on POSIX systems only.
+  if (process.platform === 'win32') return;
   const posix = path.join(dir, 'posix');
   fs.mkdirSync(posix);
   fs.writeFileSync(path.join(posix, 'codex'), '#!/bin/sh\n', { mode: 0o755 });

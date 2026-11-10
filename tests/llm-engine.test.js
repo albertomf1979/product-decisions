@@ -75,6 +75,9 @@ test('childEnv drops session-binding variables and keeps provider settings', () 
 test('resolveClaude honours PRODUCT_DECISIONS_CLAUDE_BIN, then PATH, and returns null when absent', (t) => {
   const { fake, dir } = setup(t);
   assert.equal(resolveClaude({ env: { PRODUCT_DECISIONS_CLAUDE_BIN: path.join(dir, 'missing') } }), null);
+  assert.ok(resolveClaude({ env: { PRODUCT_DECISIONS_CLAUDE_BIN: fake } }));
+  // A POSIX PATH cannot hold a Windows absolute path (C:\…): checked on POSIX systems only.
+  if (process.platform === 'win32') return;
   const posixDir = path.join(dir, 'posix');
   fs.mkdirSync(posixDir);
   fs.writeFileSync(path.join(posixDir, 'claude'), '#!/bin/sh\n', { mode: 0o755 });
