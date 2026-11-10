@@ -25,6 +25,19 @@ const COMMAND_ARGS = /<command-args>([\s\S]*?)<\/command-args>/;
 const IDE_CONTEXT = /^\s*<ide_[a-z_]+>/;
 const REMINDER = /^\s*<system-reminder>/;
 const SYNTHETIC_MODEL = '<synthetic>';
+// Messages that reach the conversation as a user turn without being the person's words:
+// task notifications and reminders from the tool, and reports from another session.
+const NOTIFICATION = /^\s*<task-notification>/;
+
+/** Why a user text record is not the person's prompt, or null when it is. */
+function notTyped(record, text) {
+  if (NOTIFICATION.test(text)) return 'notification';
+  if (REMINDER.test(text)) return 'reminder';
+  if (record.turnOrigin === 'peer') return 'peer_message';
+  const kind = isObject(record.origin) ? record.origin.kind : null;
+  if (typeof kind === 'string' && kind !== 'human') return `origin:${kind}`;
+  return null;
+}
 
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const stringOr = (value, fallback = null) => (typeof value === 'string' ? value : fallback);
@@ -199,7 +212,9 @@ function toPayloads(records, { sessionId }) {
       continue;
     }
     const command = COMMAND_NAME.exec(text);
-    if (record.isCompactSummary) {
+    const injected = record.isCompactSummary ? null : notTyped(record, text);
+    if (injected) count(injected);
+    else if (record.isCompactSummary) {
       emit('PostCompact', { trigger: compactTrigger || 'auto', compact_summary: text });
       compactTrigger = null;
     } else if (INTERRUPT.test(text)) count('interrupt');

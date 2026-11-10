@@ -236,3 +236,17 @@ test('sessions opened in a subfolder of the repository or of a worktree are foun
     ['in-repo', 'repository'], ['in-removed-worktree', 'subfolder'], ['in-subfolder', 'subfolder'],
   ]);
 });
+
+test('messages the tool injects, or another session sends, are not the person\'s prompts', () => {
+  const records = [
+    userText('i1', 1, '<task-notification>\n<task-id>abc</task-id>\n<status>completed</status>\n</task-notification>', { origin: { kind: 'task-notification' }, promptSource: 'system', turnOrigin: 'task_notification' }),
+    userText('i2', 2, '<system-reminder>\nThe user started your proposal.\n</system-reminder>', { promptSource: 'sdk', turnOrigin: 'sdk' }),
+    userText('i3', 3, 'A report from another session.', { turnOrigin: 'peer' }),
+    userText('i4', 4, 'Scheduled check-in.', { origin: { kind: 'scheduled' } }),
+    userText('i5', 5, 'Typed by the person.', { origin: { kind: 'human' }, promptSource: 'sdk', turnOrigin: 'human' }),
+    userText('i6', 6, 'An older transcript, with no origin fields.'),
+  ];
+  const { items, skipped } = toPayloads(records, { sessionId: 's' });
+  assert.deepEqual(items.map((item) => item.payload.prompt), ['Typed by the person.', 'An older transcript, with no origin fields.']);
+  assert.deepEqual(skipped, { notification: 1, reminder: 1, peer_message: 1, 'origin:scheduled': 1 });
+});
