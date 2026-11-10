@@ -107,3 +107,67 @@ test('the Codex marketplace points at the plugin folder', () => {
   assert.equal(market.plugins[0].name, 'product-decisions');
   assert.deepEqual(market.plugins[0].source, { source: 'local', path: './plugin' });
 });
+
+// Wrappers (PRD 8.11): explicit invocation only, in both tools, whichever folder a tool loads.
+const PLUGIN = path.join(__dirname, '..', 'plugin');
+function skillFiles() {
+  const found = [];
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.name === 'SKILL.md') found.push(full);
+    }
+  };
+  walk(PLUGIN);
+  return found.sort();
+}
+const frontmatter = (text) => {
+  const match = /^---\n([\s\S]*?)\n---\n/.exec(text);
+  return match ? Object.fromEntries(match[1].split('\n').map((line) => [line.slice(0, line.indexOf(':')).trim(), line.slice(line.indexOf(':') + 1).trim()])) : {};
+};
+const skill = (file) => {
+  const text = fs.readFileSync(file, 'utf8');
+  return { file, text, meta: frontmatter(text), body: text.replace(/^---\n[\s\S]*?\n---\n/, ''), folder: path.relative(PLUGIN, path.dirname(file)).split(path.sep).join('/') };
+};
+
+test('every skill in the plugin is explicit-only in both tools', () => {
+  const skills = skillFiles().map(skill);
+  assert.equal(skills.length, 4);
+  for (const { file, meta } of skills) {
+    assert.equal(meta['disable-model-invocation'], 'true', `${file}: Claude Code would add it to the model's context`);
+    const policy = fs.readFileSync(path.join(path.dirname(file), 'agents', 'openai.yaml'), 'utf8');
+    assert.match(policy, /^policy:\n {2}allow_implicit_invocation: false\n?$/m, `${file}: Codex would add it to the model's context`);
+  }
+});
+
+test('the wrappers are status and verify, and each runs only its own command', () => {
+  const skills = skillFiles().map(skill);
+  assert.deepEqual(skills.map((s) => [s.folder, s.meta.name]), [
+    ['codex-skills/product-decisions-status', 'product-decisions-status'],
+    ['codex-skills/product-decisions-verify', 'product-decisions-verify'],
+    ['skills/status', 'status'],
+    ['skills/verify', 'verify'],
+  ]);
+  for (const s of skills) {
+    const command = s.meta.name.replace('product-decisions-', '');
+    const runs = [...s.body.matchAll(/(?:index\.js"|v\d+\.\d+\.\d+) (\w+)/g)].map((m) => m[1]);
+    assert.deepEqual([...new Set(runs)], [command], `${s.folder} runs ${runs}`);
+  }
+  for (const s of skills.filter((x) => x.folder.startsWith('skills/'))) {
+    assert.equal(s.meta['allowed-tools'], `Bash(node "\${CLAUDE_PLUGIN_ROOT}/src/cli/index.js" ${s.meta.name})`);
+    assert.match(s.body, new RegExp(`!\`node "\\$\\{CLAUDE_PLUGIN_ROOT\\}/src/cli/index\\.js" ${s.meta.name}\``));
+  }
+});
+
+test('the Codex manifest names its own skill folder', () => {
+  assert.equal(read('plugin', '.codex-plugin', 'plugin.json').skills, './codex-skills/');
+  assert.equal(read('plugin', '.claude-plugin', 'plugin.json').skills, undefined, 'Claude Code reads its default skills/ folder');
+});
+
+test('the Codex wrappers pin the tag of the package version', () => {
+  const { version } = read('package.json');
+  for (const s of skillFiles().map(skill).filter((x) => x.folder.startsWith('codex-skills/'))) {
+    assert.match(s.body, new RegExp(`npx --yes github:albertomf1979/product-decisions#v${version.replace(/\./g, '\\.')} `));
+  }
+});

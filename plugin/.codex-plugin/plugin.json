@@ -14,5 +14,6 @@
     "product",
     "audit"
   ],
-  "hooks": "./hooks/codex.json"
+  "hooks": "./hooks/codex.json",
+  "skills": "./codex-skills/"
 }
