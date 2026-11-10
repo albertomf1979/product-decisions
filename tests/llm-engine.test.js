@@ -10,10 +10,26 @@ const { installFakeClaude, npmShim } = require('./helpers/fake-claude.js');
 
 const SCHEMA = { type: 'object', properties: { decisions: { type: 'array' } }, required: ['decisions'] };
 
+/**
+ * On Windows a process the test just killed can hold its folder for a while, and Node 18's
+ * rmSync does not retry EBUSY on a subfolder. Retry for up to 5 s, then leave the
+ * temporary folder to the system: removing it is not what the test checks.
+ */
+function removeWhenFree(dir) {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+      return;
+    } catch (err) {
+      if (!['EBUSY', 'EPERM', 'ENOTEMPTY'].includes(err.code)) throw err;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+    }
+  }
+}
+
 function setup(t) {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pd-engine-')));
-  // On Windows a process the test just killed can hold its folder for a moment.
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }));
+  t.after(() => removeWhenFree(dir));
   const fake = installFakeClaude(path.join(dir, 'bin'));
   const log = path.join(dir, 'log.jsonl');
   const bin = resolveClaude({ env: { PRODUCT_DECISIONS_CLAUDE_BIN: fake } });

@@ -13,10 +13,26 @@ const { sanitizeConfig } = require('../plugin/src/core/config.js');
 
 const SCHEMA = { type: 'object', properties: { decisions: { type: 'array' } }, required: ['decisions'] };
 
+/**
+ * On Windows a process the test just killed can hold its folder for a while, and Node 18's
+ * rmSync does not retry EBUSY on a subfolder. Retry for up to 5 s, then leave the
+ * temporary folder to the system: removing it is not what the test checks.
+ */
+function removeWhenFree(dir) {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+      return;
+    } catch (err) {
+      if (!['EBUSY', 'EPERM', 'ENOTEMPTY'].includes(err.code)) throw err;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+    }
+  }
+}
+
 function setup(t) {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pd-codex-')));
-  // On Windows a process the test just killed can hold its folder for a moment.
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }));
+  t.after(() => removeWhenFree(dir));
   const bin = resolveCodex({ env: { PRODUCT_DECISIONS_CODEX_BIN: installFakeCodex(path.join(dir, 'bin')) } });
   const log = path.join(dir, 'log.jsonl');
   const env = (mode, extra = {}) => ({ ...process.env, FAKE_CODEX_MODE: mode, FAKE_CODEX_LOG: log, CODEX_THREAD_ID: 'parent-thread', ...extra });
