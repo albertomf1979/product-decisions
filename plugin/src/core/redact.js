@@ -147,13 +147,19 @@ const homePatterns = new Map();
 
 /**
  * Replaces the home folder with `~`, so the person's account name stays out of the
- * record. Only at a path boundary: /Users/ana must not touch /Users/anabel.
+ * record. Only at a path boundary: /Users/ana must not touch /Users/anabel. Also its
+ * encoded form, as Claude Code names project folders (/Users/ana → -Users-ana), which
+ * shows up in transcript and temporary paths such as /private/tmp/claude-501/-Users-ana-x.
  */
 function maskHome(text, home) {
   if (!home || home.length < 2) return text;
   if (!homePatterns.has(home)) {
     const forms = [...new Set([home, home.replace(/\\/g, '/')])].map(escapeRegExp);
-    homePatterns.set(home, new RegExp(`(?:${forms.join('|')})(?=$|[\\\\/\\s"'<>:;,)\\]}])`, 'g'));
+    const encoded = escapeRegExp(home.replace(/[^A-Za-z0-9]/g, '-'));
+    homePatterns.set(home, new RegExp(
+      `(?:${forms.join('|')})(?=$|[\\\\/\\s"'<>:;,)\\]}])|(?<=^|[\\\\/\\s"'(\\[{<=:])${encoded}(?=$|[-\\\\/\\s"'<>:;,)\\]}])`,
+      'g',
+    ));
   }
   return text.replace(homePatterns.get(home), '~');
 }

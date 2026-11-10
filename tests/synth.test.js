@@ -365,3 +365,11 @@ test('an imported session names what an import cannot observe', () => {
   assert.match(text, /Imported from the transcript, not observed by hooks:/);
   assert.equal(tr('es', 'coverage_imported') !== 'coverage_imported', true);
 });
+
+test('a chronicle masks the encoded home of an event recorded before the fix', () => {
+  n = 0;
+  const events = [ev('tool_call', { summary: 'Bash cat /private/tmp/claude-501/-Users-ana-Documents/s/tasks/out', session: 'enc-12345678' })];
+  const text = chronicle(events, DEFAULT_CONFIG, { machine: 'abcd1234', home: '/Users/ana' });
+  assert(!text.includes('-Users-ana'));
+  assert.match(text, /claude-501\/\\~-Documents/, 'Markdown escapes the tilde');
+});

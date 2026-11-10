@@ -458,3 +458,19 @@ test('an imported event keeps its origin, time, and given git, and leaves the se
   assert.equal(event.model, 'claude-haiku-5-5', 'the hint still names the model');
   assert.equal(readSessionMeta(location.commonDir, 'claude-code', payload.session_id), null, 'no session meta is written');
 });
+
+test('a captured event holds no encoded home', (t) => {
+  const { root, base } = activeRepo(t);
+  const encoded = base.replace(/[^A-Za-z0-9]/g, '-');
+  const env = { HOME: base, USERPROFILE: base };
+  sendAs(root, {
+    project: root, cwd: root, name: 'PostToolUse-Read.json', env,
+    overrides: {
+      transcript_path: `/private/tmp/claude-501/${encoded}-repo/s/x.jsonl`,
+      tool_input: { file_path: path.join(root, 'PRD.md') },
+      tool_response: `see /private/tmp/claude-501/${encoded}-repo/s/tasks/out and ${path.join(base, '.claude', 'projects', `${encoded}-repo`)}`,
+    },
+  });
+  assert.equal(capturedEvents(root).length, 1);
+  assert(!recordText(root).includes(encoded), 'the encoded home must not appear in the record');
+});

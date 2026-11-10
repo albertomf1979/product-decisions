@@ -243,3 +243,11 @@ test('redactValue masks the home folder in keys and values', () => {
   const out = redactValue({ ['/Users/ana/a']: '/Users/ana/b' }, [], '/Users/ana');
   assert.deepEqual(out, { '~/a': '~/b' });
 });
+
+test('the encoded home is masked too', () => {
+  assert.equal(maskHome('/private/tmp/claude-501/-Users-ana-Documents/s/x', '/Users/ana'), '/private/tmp/claude-501/~-Documents/s/x');
+  assert.equal(maskHome('~/.claude/projects/-Users-ana/s.jsonl', '/Users/ana'), '~/.claude/projects/~/s.jsonl');
+  assert.equal(maskHome('/tmp/-Users-anabel-x and /tmp/x-Users-ana-y', '/Users/ana'), '/tmp/-Users-anabel-x and /tmp/x-Users-ana-y');
+  assert.equal(maskHome('cd -Users-ana', '/Users/ana'), 'cd ~');
+  assert.equal(maskHome('C:\\Users\\ana\\.claude\\projects\\C--Users-ana-repo\\s.jsonl', 'C:\\Users\\ana'), '~\\.claude\\projects\\~-repo\\s.jsonl');
+});
